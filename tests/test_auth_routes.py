@@ -1,5 +1,6 @@
 import re
 from collections.abc import Generator
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,6 +23,7 @@ from app.models.site import Site
 from app.models.user import User
 from app.models.user_session import UserSession
 from app.services.session_service import create_session, find_valid_session
+from app.services.user_service import UserService
 
 
 TEST_PASSWORD = "correct horse battery staple"
@@ -83,6 +85,7 @@ def extract_csrf_token(html: str) -> str:
 def login(
     client: TestClient,
     *,
+    username: str = "admin",
     password: str = TEST_PASSWORD,
     next_destination: str = "/dashboard",
 ):
@@ -91,7 +94,7 @@ def login(
     return client.post(
         "/login",
         data={
-            "username": "admin",
+            "username": username,
             "password": password,
             "csrf_token": csrf_token,
             "next": next_destination,
@@ -572,3 +575,421 @@ def test_forced_password_change_clears_flag_and_unlocks_dashboard(
     db.refresh(user)
     assert not user.must_change_password
     assert client.get("/dashboard").status_code == 200
+
+
+def create_role(db: Session, code: str, name: str) -> Role:
+    role = Role(code=code, name=name, is_system=True)
+    db.add(role)
+    db.commit()
+    return role
+
+
+def submit_new_user(
+    client: TestClient,
+    selected_role_ids: list[str],
+    **overrides: object,
+):
+    page = client.get("/users/new")
+    assert page.status_code == 200
+    data: dict[str, object] = {
+        "username": "jamilah",
+        "full_name": "Jamilah Hassan",
+        "email": "jamilah@example.test",
+        "role_ids": selected_role_ids,
+        "temporary_password": "temporary secure passphrase",
+        "confirm_password": "temporary secure passphrase",
+        "is_active": "true",
+        "csrf_token": extract_csrf_token(page.text),
+    }
+    data.update(overrides)
+    return client.post("/users/new", data=data)
+
+
+def test_user_list_redirects_anonymous_user(client: TestClient) -> None:
+    response = client.get("/users")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login?next=%2Fusers"
+
+
+def test_user_list_requires_users_view_permission(
+    client: TestClient,
+    db: Session,
+) -> None:
+    create_user(db, permissions=("cameras.view",))
+    assert login(client).status_code == 303
+
+    response = client.get("/users")
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Permission denied"}
+
+
+def test_user_list_renders_real_database_users_and_manage_action(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("users.view", "users.manage"))
+    actor.email = "admin@example.test"
+    db.commit()
+    assert login(client).status_code == 303
+
+    response = client.get("/users")
+
+    assert response.status_code == 200
+    assert "System Administrator" in response.text
+    assert "admin@example.test" in response.text
+    assert "Administrator" in response.text
+    assert "Add user" in response.text
+    assert 'href="/users/new"' in response.text
+    assert 'data-nav-key="users"' in response.text
+
+
+def test_user_list_hides_manage_action_without_users_manage(
+    client: TestClient,
+    db: Session,
+) -> None:
+    create_user(db, permissions=("users.view",))
+    assert login(client).status_code == 303
+
+    response = client.get("/users")
+
+    assert response.status_code == 200
+    assert 'href="/users/new"' not in response.text
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_username"),
+    [
+        ("CAMERAOPS", "cameraops"),
+        ("nur aisyah", "gateagent"),
+        ("mailtarget@EXAMPLE.test", "mailagent"),
+    ],
+)
+def test_user_list_searches_username_full_name_and_email_case_insensitively(
+    client: TestClient,
+    db: Session,
+    query: str,
+    expected_username: str,
+) -> None:
+    actor = create_user(db, permissions=("users.view",))
+    db.add_all(
+        [
+            User(
+                username="cameraops",
+                full_name="Camera Operator",
+                email="camera@example.test",
+                password_hash=hash_password(TEST_PASSWORD),
+                is_active=True,
+                must_change_password=False,
+                roles=[actor.roles[0]],
+            ),
+            User(
+                username="gateagent",
+                full_name="Nur Aisyah Rahman",
+                email="gate@example.test",
+                password_hash=hash_password(TEST_PASSWORD),
+                is_active=True,
+                must_change_password=False,
+                roles=[actor.roles[0]],
+            ),
+            User(
+                username="mailagent",
+                full_name="Email Match",
+                email="mailtarget@example.test",
+                password_hash=hash_password(TEST_PASSWORD),
+                is_active=True,
+                must_change_password=False,
+                roles=[actor.roles[0]],
+            ),
+        ]
+    )
+    db.commit()
+    assert login(client).status_code == 303
+
+    response = client.get("/users", params={"q": query})
+
+    assert response.status_code == 200
+    assert expected_username in response.text
+    for excluded in {"cameraops", "gateagent", "mailagent"} - {expected_username}:
+        assert excluded not in response.text
+
+
+def test_user_list_uses_status_priority(
+    db: Session,
+) -> None:
+    user = create_user(db, permissions=("users.view",))
+    user.is_active = False
+    user.locked_until = datetime.now(timezone.utc) + timedelta(hours=1)
+    user.must_change_password = True
+    db.add_all(
+        [
+            User(
+                username="locked-user",
+                full_name="Locked User",
+                password_hash=hash_password(TEST_PASSWORD),
+                is_active=True,
+                must_change_password=True,
+                locked_until=datetime.now(timezone.utc) + timedelta(hours=1),
+                roles=[user.roles[0]],
+            ),
+            User(
+                username="password-user",
+                full_name="Password User",
+                password_hash=hash_password(TEST_PASSWORD),
+                is_active=True,
+                must_change_password=True,
+                roles=[user.roles[0]],
+            ),
+            User(
+                username="active-user",
+                full_name="Active User",
+                password_hash=hash_password(TEST_PASSWORD),
+                is_active=True,
+                must_change_password=False,
+                roles=[user.roles[0]],
+            ),
+        ]
+    )
+    db.commit()
+
+    listed = UserService(db).list_users()
+
+    statuses = {item.username: item.status_label for item in listed}
+    assert statuses == {
+        "active-user": "Active",
+        "admin": "Inactive",
+        "locked-user": "Locked",
+        "password-user": "Password change required",
+    }
+
+
+def test_new_user_page_requires_users_manage_permission(
+    client: TestClient,
+    db: Session,
+) -> None:
+    create_user(db, permissions=("users.view",))
+    assert login(client).status_code == 303
+
+    response = client.get("/users/new")
+
+    assert response.status_code == 403
+
+    csrf_token = extract_csrf_token(client.get("/dashboard").text)
+    post_response = client.post(
+        "/users/new",
+        data={
+            "username": "unauthorized",
+            "full_name": "Unauthorized User",
+            "temporary_password": "temporary secure passphrase",
+            "confirm_password": "temporary secure passphrase",
+            "csrf_token": csrf_token,
+        },
+    )
+    assert post_response.status_code == 403
+
+
+def test_new_user_page_lists_database_roles(
+    client: TestClient,
+    db: Session,
+) -> None:
+    create_user(db, permissions=("users.manage",))
+    role = create_role(db, "security", "Security Team")
+    assert login(client).status_code == 303
+
+    response = client.get("/users/new")
+
+    assert response.status_code == 200
+    assert "Security Team" in response.text
+    assert "security" in response.text
+    assert str(role.id) in response.text
+
+
+def test_create_user_stores_roles_argon2_state_and_safe_audit(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("users.manage",))
+    operator_role = create_role(db, "operator", "Operator")
+    assert login(client).status_code == 303
+
+    response = submit_new_user(
+        client,
+        [str(actor.roles[0].id), str(operator_role.id)],
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/users"
+    created = db.scalar(select(User).where(User.username == "jamilah"))
+    assert created is not None
+    assert created.full_name == "Jamilah Hassan"
+    assert created.email == "jamilah@example.test"
+    assert created.is_active
+    assert created.must_change_password
+    assert created.failed_login_count == 0
+    assert created.locked_until is None
+    assert created.password_hash.startswith("$argon2")
+    assert verify_password("temporary secure passphrase", created.password_hash)
+    assert {role.code for role in created.roles} == {"administrator", "operator"}
+
+    audit = db.scalar(select(AuditLog).where(AuditLog.action == "user.create"))
+    assert audit is not None
+    assert audit.actor_user_id == actor.id
+    assert audit.entity_id == str(created.id)
+    assert audit.ip_address == "testclient"
+    assert audit.details == {
+        "created_user_id": str(created.id),
+        "username": "jamilah",
+        "role_codes": ["administrator", "operator"],
+        "is_active": True,
+    }
+    audit_text = str(audit.details)
+    assert "temporary secure passphrase" not in audit_text
+    assert created.password_hash not in audit_text
+
+
+def test_create_user_stores_inactive_state(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("users.manage",))
+    assert login(client).status_code == 303
+
+    response = submit_new_user(
+        client,
+        [str(actor.roles[0].id)],
+        is_active="",
+    )
+
+    assert response.status_code == 303
+    created = db.scalar(select(User).where(User.username == "jamilah"))
+    assert created is not None
+    assert not created.is_active
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"username": "   "}, "Username is required."),
+        (
+            {"temporary_password": "short pass", "confirm_password": "short pass"},
+            "Temporary password must contain at least 12 characters.",
+        ),
+        (
+            {"confirm_password": "another secure passphrase"},
+            "Temporary passwords do not match.",
+        ),
+        ({"role_ids": ["not-a-role-id"]}, "One or more selected roles are invalid."),
+        ({"email": "not-an-email"}, "Enter a valid email address."),
+    ],
+)
+def test_create_user_rejects_invalid_form_data(
+    client: TestClient,
+    db: Session,
+    overrides: dict[str, object],
+    message: str,
+) -> None:
+    actor = create_user(db, permissions=("users.manage",))
+    assert login(client).status_code == 303
+
+    response = submit_new_user(client, [str(actor.roles[0].id)], **overrides)
+
+    assert response.status_code == 400
+    assert message in response.text
+    assert "temporary secure passphrase" not in response.text
+    assert db.scalar(select(User).where(User.username == "jamilah")) is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("username", "admin", "That username is already in use."),
+        ("email", "ADMIN@EXAMPLE.TEST", "That email address is already in use."),
+    ],
+)
+def test_create_user_rejects_duplicate_username_or_email(
+    client: TestClient,
+    db: Session,
+    field: str,
+    value: str,
+    message: str,
+) -> None:
+    actor = create_user(db, permissions=("users.manage",))
+    actor.email = "admin@example.test"
+    db.commit()
+    assert login(client).status_code == 303
+
+    response = submit_new_user(
+        client,
+        [str(actor.roles[0].id)],
+        **{field: value},
+    )
+
+    assert response.status_code == 400
+    assert message in response.text
+
+
+@pytest.mark.parametrize("csrf_token", [None, "invalid"])
+def test_create_user_rejects_missing_or_invalid_csrf(
+    client: TestClient,
+    db: Session,
+    csrf_token: str | None,
+) -> None:
+    actor = create_user(db, permissions=("users.manage",))
+    assert login(client).status_code == 303
+    data = {
+        "username": "jamilah",
+        "full_name": "Jamilah Hassan",
+        "email": "jamilah@example.test",
+        "role_ids": str(actor.roles[0].id),
+        "temporary_password": "temporary secure passphrase",
+        "confirm_password": "temporary secure passphrase",
+        "is_active": "true",
+    }
+    if csrf_token is not None:
+        data["csrf_token"] = csrf_token
+
+    response = client.post("/users/new", data=data)
+
+    assert response.status_code == 403
+    assert db.scalar(select(User).where(User.username == "jamilah")) is None
+
+
+def test_created_user_is_forced_to_change_password_before_dashboard(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("users.manage",))
+    role = create_role(db, "operator", "Operator")
+    assert login(client).status_code == 303
+    assert submit_new_user(client, [str(role.id)]).status_code == 303
+
+    dashboard = client.get("/dashboard")
+    logout_token = extract_csrf_token(dashboard.text)
+    assert client.post("/logout", data={"csrf_token": logout_token}).status_code == 303
+
+    response = login(
+        client,
+        username="jamilah",
+        password="temporary secure passphrase",
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/account/change-password"
+    blocked_dashboard = client.get("/dashboard")
+    assert blocked_dashboard.status_code == 303
+    assert blocked_dashboard.headers["location"] == "/account/change-password"
+
+
+@pytest.mark.parametrize("path", ["/register", "/signup"])
+def test_self_registration_routes_do_not_exist(
+    client: TestClient,
+    path: str,
+) -> None:
+    response = client.get(path)
+
+    assert response.status_code == 404
+
+    login_page = client.get("/login")
+    assert 'href="/register"' not in login_page.text
+    assert 'href="/signup"' not in login_page.text

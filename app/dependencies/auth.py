@@ -100,3 +100,18 @@ def require_permission(permission_code: str) -> Callable[..., User]:
         return user
 
     return permission_dependency
+
+
+def require_page_permission(permission_code: str) -> Callable[..., User]:
+    """Build a permission dependency for server-rendered application pages."""
+    def permission_dependency(
+        user: User = Depends(require_authenticated_user_page),
+    ) -> User:
+        if not user_has_permission(user, permission_code):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied",
+            )
+        return user
+
+    return permission_dependency

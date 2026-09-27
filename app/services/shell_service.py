@@ -21,12 +21,12 @@ class NavigationGroup:
     items: tuple[NavigationItem, ...]
 
 
-_FUTURE_NAVIGATION = (
-    ("Management", "sites", "Sites", "site", "sites.view"),
-    ("Management", "cameras", "Cameras", "camera", "cameras.view"),
-    ("Management", "users", "Users", "users", "users.view"),
-    ("Monitoring", "recognition", "Recognition History", "recognition", "events.view"),
-    ("Monitoring", "audit", "Audit Log", "audit", "audit.view"),
+_PERMISSION_NAVIGATION = (
+    ("Management", "sites", "Sites", "site", "sites.view", None),
+    ("Management", "cameras", "Cameras", "camera", "cameras.view", None),
+    ("Management", "users", "Users", "users", "users.view", "/users"),
+    ("Monitoring", "recognition", "Recognition History", "recognition", "events.view", None),
+    ("Monitoring", "audit", "Audit Log", "audit", "audit.view", None),
 )
 
 
@@ -65,10 +65,10 @@ def build_navigation(
         ]
     }
 
-    for group, key, label, icon, required_permission in _FUTURE_NAVIGATION:
+    for group, key, label, icon, required_permission, href in _PERMISSION_NAVIGATION:
         if required_permission in granted:
             grouped.setdefault(group, []).append(
-                NavigationItem(key=key, label=label, icon=icon)
+                NavigationItem(key=key, label=label, icon=icon, href=href)
             )
 
     grouped["System"] = [account_item]

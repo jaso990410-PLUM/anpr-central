@@ -1490,6 +1490,206 @@ a.nav-item:hover {
     font-size: 0.76rem;
 }
 
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.muted-text {
+    color: var(--text-muted);
+}
+
+.button-primary--compact,
+.button-secondary {
+    display: inline-flex;
+    min-height: 2.55rem;
+    align-items: center;
+    justify-content: center;
+    padding: 0 0.95rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.73rem;
+    font-weight: 720;
+    text-decoration: none;
+}
+
+.button-primary--compact {
+    margin-top: 0;
+}
+
+.button-secondary {
+    border: 1px solid var(--border-strong);
+    color: var(--text-secondary);
+    background: rgba(17, 26, 39, 0.78);
+    cursor: pointer;
+}
+
+.button-secondary:hover {
+    border-color: rgba(47, 168, 255, 0.45);
+    color: var(--text);
+    background: rgba(47, 168, 255, 0.07);
+}
+
+.user-directory__header {
+    align-items: flex-end;
+}
+
+.directory-search {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.directory-search input {
+    width: min(23rem, 34vw);
+    min-height: 2.55rem;
+    padding: 0 0.8rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    background: rgba(8, 13, 21, 0.55);
+}
+
+.directory-search input:focus {
+    border-color: var(--primary);
+    outline: 0;
+    box-shadow: 0 0 0 3px rgba(47, 168, 255, 0.12);
+}
+
+.user-table {
+    min-width: 70rem;
+}
+
+.role-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.32rem;
+}
+
+.role-badge {
+    display: inline-flex;
+    padding: 0.22rem 0.42rem;
+    border: 1px solid rgba(69, 214, 232, 0.2);
+    border-radius: 0.25rem;
+    color: #afe9ef;
+    background: rgba(69, 214, 232, 0.06);
+    font-family: var(--sans);
+    font-size: 0.6rem;
+    white-space: nowrap;
+}
+
+.user-form-panel {
+    max-width: 64rem;
+}
+
+.user-form-panel > .alert {
+    margin: 1.25rem 1.25rem 0;
+}
+
+.staff-user-form {
+    display: grid;
+    gap: 1.5rem;
+    padding: clamp(1.25rem, 3vw, 2rem);
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.1rem;
+}
+
+.form-grid__wide {
+    grid-column: 1 / -1;
+}
+
+.staff-user-form .field-group small {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+}
+
+.role-selector {
+    margin: 0;
+    padding: 1.1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.role-selector legend {
+    padding: 0 0.35rem;
+    color: var(--text);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.role-selector > p {
+    margin: 0 0 0.9rem;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+
+.role-selector__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.6rem;
+}
+
+.role-option,
+.account-state-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.7rem;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: rgba(8, 13, 21, 0.25);
+    cursor: pointer;
+}
+
+.role-option:hover,
+.account-state-option:hover {
+    border-color: var(--border-strong);
+}
+
+.role-option input,
+.account-state-option input {
+    margin-top: 0.15rem;
+    accent-color: var(--primary);
+}
+
+.role-option span,
+.account-state-option span {
+    display: grid;
+    gap: 0.2rem;
+}
+
+.role-option strong,
+.account-state-option strong {
+    color: var(--text);
+    font-size: 0.75rem;
+}
+
+.role-option small,
+.account-state-option small {
+    color: var(--text-muted);
+    font-size: 0.65rem;
+}
+
+.account-state-option {
+    max-width: 28rem;
+}
+
+.form-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding-top: 0.2rem;
+}
+
 /* Responsive behavior */
 
 @media (max-width: 75rem) {
@@ -1640,6 +1840,20 @@ a.nav-item:hover {
     .panel-header {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    .directory-search {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .directory-search input {
+        width: 100%;
+    }
+
+    .form-grid,
+    .role-selector__grid {
+        grid-template-columns: 1fr;
     }
 
     .readiness-list li {
