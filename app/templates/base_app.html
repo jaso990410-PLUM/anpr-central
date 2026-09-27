@@ -1,0 +1,94 @@
+{% from "components/nav_icon.html" import nav_icon %}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0b111b">
+    <title>{% block title %}Operations Console &middot; ANPR Central{% endblock %}</title>
+    <link rel="icon" href="{{ url_for('static', path='/img/favicon.svg') }}" type="image/svg+xml">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}">
+</head>
+<body class="app-page">
+    <div class="app-layout">
+        <aside class="app-sidebar">
+            <a class="brand" href="/dashboard" aria-label="ANPR Central dashboard">
+                <span class="brand-mark" aria-hidden="true"><span></span></span>
+                <span class="brand-copy"><strong>ANPR</strong><small>CENTRAL</small></span>
+            </a>
+
+            <nav class="sidebar-nav" aria-label="Primary navigation">
+                {% for group in navigation %}
+                <section class="nav-section" aria-labelledby="nav-group-{{ loop.index }}">
+                    <p class="nav-heading" id="nav-group-{{ loop.index }}">{{ group.label }}</p>
+                    {% for item in group.items %}
+                        {% if item.is_available %}
+                        <a
+                            class="nav-item{% if active_page == item.key %} is-active{% endif %}"
+                            href="{{ item.href }}"
+                            data-nav-key="{{ item.key }}"
+                            {% if active_page == item.key %}aria-current="page"{% endif %}
+                        >
+                            {{ nav_icon(item.icon) }}
+                            <span>{{ item.label }}</span>
+                        </a>
+                        {% else %}
+                        <span class="nav-item is-disabled" data-nav-key="{{ item.key }}" aria-disabled="true">
+                            {{ nav_icon(item.icon) }}
+                            <span>{{ item.label }}</span>
+                            <small class="nav-item__status">Later</small>
+                        </span>
+                        {% endif %}
+                    {% endfor %}
+                </section>
+                {% endfor %}
+            </nav>
+
+            <div class="sidebar-footer">
+                <span class="status-dot {% if summary.database_connected %}status-dot--online{% else %}status-dot--critical{% endif %}"></span>
+                <span>Database {% if summary.database_connected %}connected{% else %}unavailable{% endif %}</span>
+            </div>
+        </aside>
+
+        <div class="app-workspace">
+            <header class="operations-bar">
+                <div class="operations-context">
+                    <div class="context-item">
+                        <span class="context-label">Site context</span>
+                        <strong class="data-text">{{ summary.site_context }}</strong>
+                    </div>
+                    <div class="context-divider"></div>
+                    <div class="health-signal">
+                        <span class="status-dot {% if summary.database_connected %}status-dot--online{% else %}status-dot--critical{% endif %}"></span>
+                        <span>{% if summary.database_connected %}System healthy{% else %}System attention{% endif %}</span>
+                    </div>
+                    <div class="context-divider context-divider--optional"></div>
+                    <div class="camera-signal">
+                        <span class="data-text">DB</span>
+                        {% if summary.database_connected %}connected{% else %}unavailable{% endif %}
+                    </div>
+                </div>
+
+                <div class="operator-identity">
+                    <span class="operator-avatar" aria-hidden="true">{{ user.username[:1] | upper }}</span>
+                    <span class="operator-copy">
+                        <strong>{{ user.username }}</strong>
+                        <small>{{ user_role_label }}</small>
+                    </span>
+                    <div class="operator-actions">
+                        <a class="button-quiet" href="/account/change-password">Change password</a>
+                        <form method="post" action="/logout">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button class="button-quiet" type="submit">Sign out</button>
+                        </form>
+                    </div>
+                </div>
+            </header>
+
+            <main class="app-content" id="main-content">
+                {% block content %}{% endblock %}
+            </main>
+        </div>
+    </div>
+</body>
+</html>

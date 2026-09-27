@@ -1,0 +1,89 @@
+{% extends "base_app.html" %}
+
+{% block title %}User Administration &middot; ANPR Central{% endblock %}
+
+{% block content %}
+<header class="page-header user-page-header">
+    <div>
+        <p class="eyebrow">Access management</p>
+        <h1>Users</h1>
+        <p>Internal staff accounts and their assigned operational roles.</p>
+    </div>
+    {% if can_manage_users %}
+    <a class="button-primary button-primary--compact" href="/users/new">Add user</a>
+    {% endif %}
+</header>
+
+<section class="ops-panel user-directory" aria-labelledby="user-directory-title">
+    <header class="panel-header user-directory__header">
+        <div>
+            <p class="panel-kicker">Authorized personnel</p>
+            <h2 id="user-directory-title">Staff directory</h2>
+        </div>
+        <form class="directory-search" method="get" action="/users" role="search">
+            <label class="visually-hidden" for="user-search">Search users</label>
+            <input
+                id="user-search"
+                name="q"
+                type="search"
+                maxlength="255"
+                value="{{ search_query }}"
+                placeholder="Search name, username or email"
+            >
+            <button class="button-secondary" type="submit">Search</button>
+            {% if search_query %}<a class="button-quiet" href="/users">Clear</a>{% endif %}
+        </form>
+    </header>
+
+    <div class="table-wrap">
+        <table class="data-table user-table">
+            <thead>
+                <tr>
+                    <th>Username</th>
+                    <th>Full name</th>
+                    <th>Email</th>
+                    <th>Roles</th>
+                    <th>Status</th>
+                    <th>Last login</th>
+                    <th>Created</th>
+                    {% if can_manage_users %}<th><span class="visually-hidden">Actions</span></th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for listed_user in users %}
+                <tr>
+                    <td><strong class="table-primary">{{ listed_user.username }}</strong></td>
+                    <td>{{ listed_user.full_name }}</td>
+                    <td>{{ listed_user.email or "Not provided" }}</td>
+                    <td>
+                        <div class="role-list">
+                            {% for role_name in listed_user.role_names %}
+                            <span class="role-badge">{{ role_name }}</span>
+                            {% else %}
+                            <span class="muted-text">No role</span>
+                            {% endfor %}
+                        </div>
+                    </td>
+                    <td><span class="status-badge status-badge--{{ listed_user.status_key }}">{{ listed_user.status_label }}</span></td>
+                    <td>{{ listed_user.last_login_display or "Never" }}</td>
+                    <td>{{ listed_user.created_display }}</td>
+                    {% if can_manage_users %}
+                    <td class="table-actions"><a class="button-quiet" href="/users/{{ listed_user.id }}/edit">Edit</a></td>
+                    {% endif %}
+                </tr>
+                {% else %}
+                <tr class="empty-row">
+                    <td colspan="{{ 8 if can_manage_users else 7 }}">
+                        <div class="empty-state">
+                            <span class="empty-state__mark" aria-hidden="true"></span>
+                            <strong>No users found</strong>
+                            <span>{% if search_query %}Try a different search term.{% else %}No staff accounts are available.{% endif %}</span>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

@@ -1,0 +1,158 @@
+{% extends "base_app.html" %}
+
+{% block title %}Operations Dashboard &middot; ANPR Central{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <p class="eyebrow">Operations overview</p>
+        <h1>Dashboard</h1>
+        <p>Live platform information for the current operating context.</p>
+    </div>
+    <div class="page-state">
+        <span class="status-badge {% if summary.database_connected %}status-badge--online{% else %}status-badge--critical{% endif %}">
+            <span class="status-dot {% if summary.database_connected %}status-dot--online{% else %}status-dot--critical{% endif %}"></span>
+            {% if summary.database_connected %}Operational{% else %}Attention{% endif %}
+        </span>
+    </div>
+</header>
+
+<section class="metric-grid" aria-label="Operational summary">
+    <article class="metric-card">
+        <div class="metric-card__topline">
+            <span class="metric-label">Site</span>
+            <span class="metric-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M5 20V6l7-3 7 3v14h-5v-5h-4v5H5Zm2-2h1v-5h8v5h1V7.3l-5-2.1-5 2.1V18Z"/></svg>
+            </span>
+        </div>
+        {% if summary.site %}
+        <strong class="metric-value metric-value--code">{{ summary.site.name }}</strong>
+        <div class="metric-status">
+            <span class="status-dot {% if summary.site.is_active %}status-dot--online{% else %}status-dot--disabled{% endif %}"></span>
+            <span class="data-text">{{ summary.site.code }}</span>
+            &middot; {{ "Active" if summary.site.is_active else "Disabled" }}
+        </div>
+        <div class="metric-detail data-text">{{ summary.site.timezone }}</div>
+        {% else %}
+        <strong class="metric-value metric-value--code">Not configured</strong>
+        <div class="metric-status"><span class="status-dot status-dot--warning"></span>No site available</div>
+        {% endif %}
+    </article>
+
+    <article class="metric-card">
+        <div class="metric-card__topline">
+            <span class="metric-label">Users</span>
+            <span class="metric-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0-2a2 2 0 1 1 0-4 2 2 0 0 1 0 4Zm-7 9a7 7 0 0 1 14 0v1H5v-1Zm2.2-1h9.6a5 5 0 0 0-9.6 0Z"/></svg>
+            </span>
+        </div>
+        <strong class="metric-value">{{ summary.user_count }}</strong>
+        <div class="metric-status">
+            <span class="status-dot {% if summary.active_user_count %}status-dot--online{% else %}status-dot--neutral{% endif %}"></span>
+            <span class="data-text">{{ summary.active_user_count }}</span> active
+        </div>
+    </article>
+
+    <article class="metric-card">
+        <div class="metric-card__topline">
+            <span class="metric-label">Cameras</span>
+            <span class="metric-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 7h11a3 3 0 0 1 3 3v1l3-2v8l-3-2v1a3 3 0 0 1-3 3H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Zm0 2v8h11a1 1 0 0 0 1-1v-6a1 1 0 0 0-1-1H4Z"/></svg>
+            </span>
+        </div>
+        <strong class="metric-value">{{ summary.camera_count }}</strong>
+        <div class="metric-status">
+            <span class="status-dot {% if summary.enabled_camera_count %}status-dot--online{% else %}status-dot--neutral{% endif %}"></span>
+            <span class="data-text">{{ summary.enabled_camera_count }}</span> enabled
+        </div>
+    </article>
+
+    <article class="metric-card metric-card--accent">
+        <div class="metric-card__topline">
+            <span class="metric-label">Active sessions</span>
+            <span class="metric-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5.1 3.4 9.8 8 11 4.6-1.2 8-5.9 8-11V5l-8-3Zm0 2.1 6 2.2V11c0 3.9-2.4 7.7-6 8.9-3.6-1.2-6-5-6-8.9V6.3l6-2.2Zm-1 4.4h2v4h-2v-4Zm0 5.5h2v2h-2v-2Z"/></svg>
+            </span>
+        </div>
+        <strong class="metric-value">{{ summary.active_session_count }}</strong>
+        <div class="metric-status">
+            <span class="status-dot {% if summary.active_session_count %}status-dot--online{% else %}status-dot--neutral{% endif %}"></span>
+            Valid now
+        </div>
+    </article>
+</section>
+
+<section class="dashboard-grid">
+    <article class="ops-panel activity-panel" aria-labelledby="camera-status-title">
+        <header class="panel-header">
+            <div>
+                <p class="panel-kicker">Configured hardware</p>
+                <h2 id="camera-status-title">Camera status</h2>
+            </div>
+            <span class="status-badge status-badge--neutral">{{ summary.camera_count }} configured</span>
+        </header>
+
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Camera</th>
+                        <th>Site</th>
+                        <th>Direction</th>
+                        <th>IP address</th>
+                        <th>Status</th>
+                        <th>Last seen</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for camera in summary.cameras %}
+                    <tr>
+                        <td><strong class="table-primary">{{ camera.name }}</strong><small>{{ camera.code }}</small></td>
+                        <td>{{ camera.site_code }}</td>
+                        <td><span class="status-badge status-badge--{{ camera.direction | lower }}">{{ camera.direction }}</span></td>
+                        <td>{{ camera.ip_address or "Not configured" }}</td>
+                        <td>
+                            <span class="status-badge {% if camera.is_enabled %}status-badge--active{% else %}status-badge--disabled{% endif %}">
+                                {{ "Enabled" if camera.is_enabled else "Disabled" }}
+                            </span>
+                        </td>
+                        <td>{{ camera.last_seen_display or "Never" }}</td>
+                    </tr>
+                    {% else %}
+                    <tr class="empty-row">
+                        <td colspan="6">
+                            <div class="empty-state">
+                                <span class="empty-state__mark" aria-hidden="true"></span>
+                                <strong>No cameras configured</strong>
+                                <span>Camera management will become available in a later milestone.</span>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </article>
+
+    <aside class="ops-panel readiness-panel" aria-labelledby="system-status-title">
+        <header class="panel-header">
+            <div>
+                <p class="panel-kicker">Platform information</p>
+                <h2 id="system-status-title">System status</h2>
+            </div>
+        </header>
+
+        <dl class="system-facts">
+            <div><dt>Application</dt><dd>{{ summary.application_name }}</dd></div>
+            <div><dt>Version</dt><dd class="data-text">{{ summary.application_version }}</dd></div>
+            <div>
+                <dt>Database</dt>
+                <dd><span class="status-dot {% if summary.database_connected %}status-dot--online{% else %}status-dot--critical{% endif %}"></span>{{ "Connected" if summary.database_connected else "Unavailable" }}</dd>
+            </div>
+            <div><dt>Site</dt><dd>{{ summary.site.name if summary.site else "Not configured" }}</dd></div>
+            <div><dt>Logged-in user</dt><dd class="data-text">{{ user.username }}</dd></div>
+            <div><dt>Role</dt><dd>{{ user_role_label }}</dd></div>
+        </dl>
+    </aside>
+</section>
+{% endblock %}
