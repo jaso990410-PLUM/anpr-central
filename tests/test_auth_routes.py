@@ -11,6 +11,10 @@ from app.core.security import hash_password, hash_session_token
 from app.db.dependencies import get_db
 from app.main import app
 from app.models.audit_log import AuditLog
+from app.models.camera import Camera
+from app.models.permission import Permission
+from app.models.role import Role
+from app.models.site import Site
 from app.models.user import User
 from app.models.user_session import UserSession
 
@@ -18,7 +22,20 @@ from app.models.user_session import UserSession
 TEST_PASSWORD = "correct horse battery staple"
 
 
-def create_user(db: Session) -> User:
+def create_user(
+    db: Session,
+    *,
+    permissions: tuple[str, ...] = (),
+) -> User:
+    role = Role(
+        code="administrator",
+        name="Administrator",
+        is_system=True,
+    )
+    role.permissions = [
+        Permission(code=code, description=f"Test permission: {code}")
+        for code in permissions
+    ]
     user = User(
         username="admin",
         full_name="System Administrator",
@@ -26,6 +43,7 @@ def create_user(db: Session) -> User:
         is_active=True,
         must_change_password=False,
         failed_login_count=0,
+        roles=[role],
     )
     db.add(user)
     db.commit()
@@ -127,7 +145,7 @@ def test_correct_login_creates_hashed_session_and_cookie(
     client: TestClient,
     db: Session,
 ) -> None:
-    create_user(db)
+    create_user(db, permissions=("users.view",))
 
     response = login(client)
 
@@ -153,14 +171,92 @@ def test_correct_login_creates_hashed_session_and_cookie(
 
     dashboard = client.get("/dashboard")
     assert dashboard.status_code == 200
-    assert "System Administrator" in dashboard.text
     assert "Operations overview" in dashboard.text
-    assert "Recognition activity" in dashboard.text
-    assert "System readiness" in dashboard.text
+    assert "Camera status" in dashboard.text
+    assert "System status" in dashboard.text
+    assert 'data-nav-key="users"' in dashboard.text
 
     root = client.get("/")
     assert root.status_code == 303
     assert root.headers["location"] == "/dashboard"
+
+
+def test_dashboard_renders_real_database_values(
+    client: TestClient,
+    db: Session,
+) -> None:
+    user = create_user(db)
+    site = Site(
+        code="MAIN",
+        name="Main Site",
+        timezone="Asia/Kuala_Lumpur",
+        is_active=True,
+    )
+    db.add(site)
+    db.flush()
+    db.add(
+        Camera(
+            site_id=site.id,
+            code="MAIN-ENTRY-01",
+            name="Main Entry",
+            direction="entry",
+            ip_address="192.0.2.10",
+            is_enabled=True,
+        )
+    )
+    db.commit()
+
+    assert login(client).status_code == 303
+    dashboard = client.get("/dashboard")
+
+    assert dashboard.status_code == 200
+    assert "Main Site" in dashboard.text
+    assert "MAIN" in dashboard.text
+    assert "Asia/Kuala_Lumpur" in dashboard.text
+    assert "MAIN-ENTRY-01" in dashboard.text
+    assert "192.0.2.10" in dashboard.text
+    assert user.username in dashboard.text
+
+
+@pytest.mark.parametrize(
+    ("permissions", "users_visible"),
+    [
+        (("users.view",), True),
+        (("cameras.view",), False),
+    ],
+)
+def test_dashboard_navigation_respects_users_view_permission(
+    client: TestClient,
+    db: Session,
+    permissions: tuple[str, ...],
+    users_visible: bool,
+) -> None:
+    create_user(db, permissions=permissions)
+    assert login(client).status_code == 303
+
+    dashboard = client.get("/dashboard")
+
+    assert dashboard.status_code == 200
+    assert ('data-nav-key="users"' in dashboard.text) is users_visible
+
+
+def test_inactive_user_session_cannot_access_dashboard(
+    client: TestClient,
+    db: Session,
+) -> None:
+    user = create_user(db)
+    assert login(client).status_code == 303
+    user.is_active = False
+    db.commit()
+
+    response = client.get("/dashboard")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login?next=%2Fdashboard"
+    db.expire_all()
+    stored_session = db.scalar(select(UserSession))
+    assert stored_session is not None
+    assert stored_session.revoked_at is not None
 
 
 def test_logout_revokes_session_and_old_cookie_stops_working(

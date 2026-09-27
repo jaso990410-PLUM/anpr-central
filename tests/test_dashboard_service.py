@@ -37,7 +37,9 @@ def test_dashboard_summary_uses_live_database_counts(db: Session) -> None:
                 code="MAIN-ENTRY-01",
                 name="Main Entry",
                 direction="entry",
+                ip_address="192.0.2.10",
                 is_enabled=True,
+                last_seen_at=NOW,
             ),
             Camera(
                 site_id=main_site.id,
@@ -76,18 +78,28 @@ def test_dashboard_summary_uses_live_database_counts(db: Session) -> None:
     assert summary.site_count == 2
     assert summary.active_site_count == 1
     assert summary.site_context == "MAIN"
+    assert summary.site is not None
+    assert summary.site.name == "Main Site"
+    assert summary.site.timezone == "Asia/Kuala_Lumpur"
+    assert summary.site.is_active
+    assert summary.database_connected
+    assert summary.application_name == "ANPR Central"
+    assert summary.application_version == "0.1.0"
     assert summary.camera_count == 2
     assert summary.enabled_camera_count == 1
+    assert summary.cameras[0].code == "MAIN-ENTRY-01"
+    assert summary.cameras[0].ip_address == "192.0.2.10"
+    assert summary.cameras[0].last_seen_display == "2026-09-27 15:00:00"
     assert summary.user_count == 2
     assert summary.active_user_count == 1
-    assert summary.active_session_count == 1
+    assert summary.active_session_count == 2
 
 
-def test_dashboard_site_context_supports_multiple_sites(db: Session) -> None:
+def test_dashboard_uses_configured_default_site(db: Session) -> None:
     db.add_all(
         [
-            Site(code="NORTH", name="North Site", is_active=True),
-            Site(code="SOUTH", name="South Site", is_active=True),
+            Site(code="A-SITE", name="Alternate Site", is_active=True),
+            Site(code="MAIN", name="Main Site", is_active=True),
         ]
     )
     db.flush()
@@ -96,4 +108,6 @@ def test_dashboard_site_context_supports_multiple_sites(db: Session) -> None:
 
     assert summary.site_count == 2
     assert summary.active_site_count == 2
-    assert summary.site_context == "2 ACTIVE SITES"
+    assert summary.site_context == "MAIN"
+    assert summary.site is not None
+    assert summary.site.name == "Main Site"

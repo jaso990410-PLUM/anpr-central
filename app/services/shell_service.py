@@ -1,0 +1,70 @@
+from dataclasses import dataclass
+
+from app.models.user import User
+
+
+@dataclass(frozen=True)
+class NavigationItem:
+    key: str
+    label: str
+    icon: str
+    href: str | None = None
+
+    @property
+    def is_available(self) -> bool:
+        return self.href is not None
+
+
+@dataclass(frozen=True)
+class NavigationGroup:
+    label: str
+    items: tuple[NavigationItem, ...]
+
+
+_FUTURE_NAVIGATION = (
+    ("Management", "sites", "Sites", "site", "sites.view"),
+    ("Management", "cameras", "Cameras", "camera", "cameras.view"),
+    ("Management", "users", "Users", "users", "users.view"),
+    ("Monitoring", "recognition", "Recognition History", "recognition", "events.view"),
+    ("Monitoring", "audit", "Audit Log", "audit", "audit.view"),
+)
+
+
+def permission_codes(user: User) -> frozenset[str]:
+    return frozenset(
+        permission.code
+        for role in user.roles
+        for permission in role.permissions
+    )
+
+
+def build_navigation(user: User) -> tuple[NavigationGroup, ...]:
+    """Build visible navigation from permissions, not role names."""
+    granted = permission_codes(user)
+    grouped: dict[str, list[NavigationItem]] = {
+        "Overview": [
+            NavigationItem(
+                key="dashboard",
+                label="Dashboard",
+                icon="dashboard",
+                href="/dashboard",
+            )
+        ]
+    }
+
+    for group, key, label, icon, required_permission in _FUTURE_NAVIGATION:
+        if required_permission in granted:
+            grouped.setdefault(group, []).append(
+                NavigationItem(key=key, label=label, icon=icon)
+            )
+
+    return tuple(
+        NavigationGroup(label=label, items=tuple(items))
+        for label, items in grouped.items()
+        if items
+    )
+
+
+def role_label(user: User) -> str:
+    role_names = sorted({role.name for role in user.roles})
+    return ", ".join(role_names) if role_names else "No role assigned"

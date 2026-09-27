@@ -13,6 +13,7 @@ from app.dependencies.auth import (
 )
 from app.models.user import User
 from app.services.dashboard_service import get_dashboard_summary
+from app.services.shell_service import build_navigation, role_label
 from app.web import templates
 
 
@@ -42,6 +43,8 @@ def dashboard(
             "csrf_token": generate_csrf_token(raw_session_token),
             "summary": get_dashboard_summary(db),
             "active_page": "dashboard",
+            "navigation": build_navigation(user),
+            "user_role_label": role_label(user),
         },
     )
 

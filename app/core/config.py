@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     mqtt_host: str = "127.0.0.1"
     mqtt_port: int = 1883
 
+    default_site_code: str = "MAIN"
+
     secret_key: str = Field(min_length=32)
     session_cookie_name: str = "anpr_session"
     csrf_cookie_name: str = "anpr_login_csrf"
