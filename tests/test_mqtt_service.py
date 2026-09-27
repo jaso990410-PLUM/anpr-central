@@ -16,6 +16,7 @@ from app.services.camera_service import (
     CREDENTIALS_REVOKED,
     OFFLINE,
     ONLINE,
+    PROVISIONED,
 )
 from app.services.mqtt_service import (
     HeartbeatRejected,
@@ -82,7 +83,24 @@ def test_valid_heartbeat_sets_online_seen_connected_and_agent_version(
     assert camera.last_seen_at == received_at
     assert camera.last_connected_at == received_at
     assert camera.agent_version == "1.0.0"
-    assert camera.provisioning_state == CONNECTING
+    assert camera.provisioning_state == PROVISIONED
+
+
+def test_first_valid_heartbeat_completes_connecting_provisioning(
+    db: Session,
+) -> None:
+    camera = create_camera(db)
+    camera.provisioning_state = CONNECTING
+    db.commit()
+
+    process_heartbeat(
+        db,
+        f"anpr/{camera.id}/status",
+        heartbeat_payload(camera.id),
+    )
+
+    assert camera.provisioning_state == PROVISIONED
+    assert camera.connection_state == ONLINE
 
 
 def test_online_heartbeat_updates_last_seen_without_resetting_last_connected(
@@ -91,6 +109,7 @@ def test_online_heartbeat_updates_last_seen_without_resetting_last_connected(
     camera = create_camera(db)
     first_connection = datetime(2026, 9, 27, 10, 0, tzinfo=timezone.utc)
     camera.connection_state = ONLINE
+    camera.provisioning_state = PROVISIONED
     camera.last_seen_at = first_connection
     camera.last_connected_at = first_connection
     db.commit()
@@ -114,6 +133,7 @@ def test_heartbeat_timeout_marks_online_camera_offline_and_reconnects(
     camera = create_camera(db)
     first_connection = datetime(2026, 9, 27, 10, 0, tzinfo=timezone.utc)
     camera.connection_state = ONLINE
+    camera.provisioning_state = PROVISIONED
     camera.last_seen_at = first_connection
     camera.last_connected_at = first_connection
     db.commit()
@@ -127,6 +147,7 @@ def test_heartbeat_timeout_marks_online_camera_offline_and_reconnects(
 
     assert changed == 1
     assert camera.connection_state == OFFLINE
+    assert camera.provisioning_state == PROVISIONED
 
     reconnected_at = timeout_check + timedelta(seconds=5)
     process_heartbeat(

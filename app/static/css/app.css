@@ -289,6 +289,12 @@ input:focus-visible {
     background: rgba(241, 185, 74, 0.08);
 }
 
+.status-badge--provisioned {
+    border-color: rgba(55, 201, 120, 0.28);
+    color: #72dda2;
+    background: rgba(55, 201, 120, 0.08);
+}
+
 .status-badge--credentials-revoked {
     border-color: rgba(239, 91, 91, 0.3);
     color: #f5a0a0;

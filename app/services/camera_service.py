@@ -15,6 +15,7 @@ from app.models.site import Site
 
 UNPROVISIONED = "UNPROVISIONED"
 CONNECTING = "CONNECTING"
+PROVISIONED = "PROVISIONED"
 CREDENTIALS_REVOKED = "CREDENTIALS_REVOKED"
 DISABLED = "DISABLED"
 ONLINE = "ONLINE"
@@ -284,6 +285,8 @@ def connection_state(camera: Camera) -> str:
         return camera.connection_state
     if camera.provisioning_state == CONNECTING:
         return CONNECTING
+    if camera.provisioning_state == PROVISIONED:
+        return OFFLINE
     return UNPROVISIONED
 
 

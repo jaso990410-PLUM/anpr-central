@@ -28,6 +28,7 @@ from app.services.camera_service import (
     CREDENTIALS_REVOKED,
     DISABLED,
     ONLINE,
+    PROVISIONED,
     UNPROVISIONED,
     CameraService,
 )
@@ -1975,7 +1976,7 @@ def test_camera_pages_render_live_heartbeat_state(
         name="Main Entry",
         direction="ENTRY",
         is_enabled=True,
-        provisioning_state="CONNECTING",
+        provisioning_state=PROVISIONED,
         connection_state=ONLINE,
         last_seen_at=datetime(2026, 9, 27, 10, 30, tzinfo=timezone.utc),
         last_connected_at=datetime(2026, 9, 27, 10, 29, tzinfo=timezone.utc),
@@ -1989,6 +1990,7 @@ def test_camera_pages_render_live_heartbeat_state(
     detail = client.get(f"/cameras/{camera.id}")
 
     assert camera_list.status_code == 200
+    assert 'status-badge--provisioned">PROVISIONED' in camera_list.text
     assert 'status-badge--online">ONLINE' in camera_list.text
     assert "2026-09-27 18:30:00" in camera_list.text
     assert "MQTT DISCONNECTED" in camera_list.text

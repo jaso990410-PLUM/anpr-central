@@ -17,11 +17,10 @@ from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.camera import Camera
 from app.services.camera_service import (
-    CONNECTING,
     CREDENTIALS_REVOKED,
     OFFLINE,
     ONLINE,
-    UNPROVISIONED,
+    PROVISIONED,
 )
 
 
@@ -123,8 +122,7 @@ def process_heartbeat(
         camera.last_connected_at = received_at
     if message.agent_version is not None:
         camera.agent_version = message.agent_version
-    if camera.provisioning_state == UNPROVISIONED:
-        camera.provisioning_state = CONNECTING
+    camera.provisioning_state = PROVISIONED
     db.flush()
     return camera
 
