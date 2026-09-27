@@ -15,6 +15,10 @@ class PageAuthenticationRequired(Exception):
     """Raised when a server-rendered page needs a login redirect."""
 
 
+class PasswordChangeRequired(Exception):
+    """Raised when a page user must update their password first."""
+
+
 def get_current_user(
     request: Request,
     db: Session = Depends(get_db),
@@ -51,14 +55,27 @@ def require_authenticated_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
         )
+    if user.must_change_password:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password change required",
+        )
     return user
 
 
-def require_authenticated_user_page(
+def require_authenticated_page_user(
     user: User | None = Depends(get_current_user),
 ) -> User:
     if user is None:
         raise PageAuthenticationRequired
+    return user
+
+
+def require_authenticated_user_page(
+    user: User = Depends(require_authenticated_page_user),
+) -> User:
+    if user.must_change_password:
+        raise PasswordChangeRequired
     return user
 
 

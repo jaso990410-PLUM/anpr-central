@@ -7,7 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
-from app.core.security import hash_password, hash_session_token
+from app.core.security import (
+    hash_password,
+    hash_session_token,
+    verify_password,
+)
 from app.db.dependencies import get_db
 from app.main import app
 from app.models.audit_log import AuditLog
@@ -17,15 +21,18 @@ from app.models.role import Role
 from app.models.site import Site
 from app.models.user import User
 from app.models.user_session import UserSession
+from app.services.session_service import create_session, find_valid_session
 
 
 TEST_PASSWORD = "correct horse battery staple"
+NEW_PASSWORD = "new correct horse battery staple"
 
 
 def create_user(
     db: Session,
     *,
     permissions: tuple[str, ...] = (),
+    must_change_password: bool = False,
 ) -> User:
     role = Role(
         code="administrator",
@@ -41,7 +48,7 @@ def create_user(
         full_name="System Administrator",
         password_hash=hash_password(TEST_PASSWORD),
         is_active=True,
-        must_change_password=False,
+        must_change_password=must_change_password,
         failed_login_count=0,
         roles=[role],
     )
@@ -92,6 +99,27 @@ def login(
     )
 
 
+def submit_password_change(
+    client: TestClient,
+    *,
+    current_password: str = TEST_PASSWORD,
+    new_password: str = NEW_PASSWORD,
+    confirm_password: str = NEW_PASSWORD,
+):
+    page = client.get("/account/change-password")
+    assert page.status_code == 200
+    csrf_token = extract_csrf_token(page.text)
+    return client.post(
+        "/account/change-password",
+        data={
+            "current_password": current_password,
+            "new_password": new_password,
+            "confirm_password": confirm_password,
+            "csrf_token": csrf_token,
+        },
+    )
+
+
 def test_login_page_loads_with_secure_form(client: TestClient) -> None:
     response = client.get("/login")
 
@@ -105,6 +133,27 @@ def test_login_page_loads_with_secure_form(client: TestClient) -> None:
     assert "VAB 1234" in response.text
     assert "Recognition preview" in response.text
     assert settings.csrf_cookie_name in response.cookies
+
+
+@pytest.mark.parametrize("csrf_token", [None, "invalid"])
+def test_login_rejects_missing_or_invalid_csrf(
+    client: TestClient,
+    db: Session,
+    csrf_token: str | None,
+) -> None:
+    create_user(db)
+    client.get("/login")
+    data = {
+        "username": "admin",
+        "password": TEST_PASSWORD,
+    }
+    if csrf_token is not None:
+        data["csrf_token"] = csrf_token
+
+    response = client.post("/login", data=data)
+
+    assert response.status_code == 400
+    assert "form expired" in response.text
 
 
 def test_root_and_protected_page_redirect_when_logged_out(
@@ -295,16 +344,18 @@ def test_logout_revokes_session_and_old_cookie_stops_working(
     assert rejected.headers["location"] == "/login?next=%2Fdashboard"
 
 
-def test_logout_rejects_invalid_csrf_token(
+@pytest.mark.parametrize("form_data", [{}, {"csrf_token": "invalid"}])
+def test_logout_rejects_missing_or_invalid_csrf_token(
     client: TestClient,
     db: Session,
+    form_data: dict[str, str],
 ) -> None:
     create_user(db)
     login(client)
 
     response = client.post(
         "/logout",
-        data={"csrf_token": "invalid"},
+        data=form_data,
     )
 
     assert response.status_code == 403
@@ -333,3 +384,191 @@ def test_login_rejects_unsafe_next_redirects(
 
     assert response.status_code == 303
     assert response.headers["location"] == "/dashboard"
+
+
+def test_change_password_page_requires_authentication(
+    client: TestClient,
+) -> None:
+    response = client.get("/account/change-password")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == (
+        "/login?next=%2Faccount%2Fchange-password"
+    )
+
+
+@pytest.mark.parametrize(
+    ("current_password", "new_password", "confirm_password", "message"),
+    [
+        (
+            "incorrect current password",
+            NEW_PASSWORD,
+            NEW_PASSWORD,
+            "Current password is incorrect.",
+        ),
+        (
+            TEST_PASSWORD,
+            "too short",
+            "too short",
+            "New password must contain at least 12 characters.",
+        ),
+        (
+            TEST_PASSWORD,
+            NEW_PASSWORD,
+            "different confirmation password",
+            "New passwords do not match.",
+        ),
+        (
+            TEST_PASSWORD,
+            TEST_PASSWORD,
+            TEST_PASSWORD,
+            "New password must be different from the current password.",
+        ),
+    ],
+)
+def test_change_password_validation(
+    client: TestClient,
+    db: Session,
+    current_password: str,
+    new_password: str,
+    confirm_password: str,
+    message: str,
+) -> None:
+    user = create_user(db)
+    assert login(client).status_code == 303
+
+    response = submit_password_change(
+        client,
+        current_password=current_password,
+        new_password=new_password,
+        confirm_password=confirm_password,
+    )
+
+    assert response.status_code == 400
+    assert message in response.text
+    db.refresh(user)
+    assert verify_password(TEST_PASSWORD, user.password_hash)
+
+
+@pytest.mark.parametrize("csrf_token", [None, "invalid"])
+def test_change_password_rejects_missing_or_invalid_csrf(
+    client: TestClient,
+    db: Session,
+    csrf_token: str | None,
+) -> None:
+    create_user(db)
+    assert login(client).status_code == 303
+    data = {
+        "current_password": TEST_PASSWORD,
+        "new_password": NEW_PASSWORD,
+        "confirm_password": NEW_PASSWORD,
+    }
+    if csrf_token is not None:
+        data["csrf_token"] = csrf_token
+
+    response = client.post("/account/change-password", data=data)
+
+    assert response.status_code == 403
+
+
+def test_successful_password_change_replaces_password_and_audits(
+    client: TestClient,
+    db: Session,
+) -> None:
+    user = create_user(db)
+    assert login(client).status_code == 303
+
+    response = submit_password_change(client)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/dashboard"
+    db.refresh(user)
+    assert user.password_hash.startswith("$argon2")
+    assert not verify_password(TEST_PASSWORD, user.password_hash)
+    assert verify_password(NEW_PASSWORD, user.password_hash)
+    assert not user.must_change_password
+
+    audit = db.scalar(
+        select(AuditLog).where(
+            AuditLog.action == "account.password_change"
+        )
+    )
+    assert audit is not None
+    assert audit.actor_user_id == user.id
+    assert audit.details == {"sessions_revoked": 1}
+    assert "password" not in str(audit.details).lower()
+
+    dashboard = client.get("/dashboard")
+    logout_csrf_token = extract_csrf_token(dashboard.text)
+    assert client.post(
+        "/logout",
+        data={"csrf_token": logout_csrf_token},
+    ).status_code == 303
+
+    assert login(client, password=TEST_PASSWORD).status_code == 401
+    assert login(client, password=NEW_PASSWORD).status_code == 303
+
+
+def test_password_change_revokes_other_sessions_and_rotates_current(
+    client: TestClient,
+    db: Session,
+) -> None:
+    user = create_user(db)
+    other_raw_token, _ = create_session(db, user)
+    db.commit()
+    assert login(client).status_code == 303
+    old_current_token = client.cookies.get(settings.session_cookie_name)
+    assert old_current_token is not None
+
+    assert submit_password_change(client).status_code == 303
+    new_current_token = client.cookies.get(settings.session_cookie_name)
+    assert new_current_token is not None
+    assert new_current_token != old_current_token
+
+    assert find_valid_session(db, other_raw_token, touch=False) is None
+    assert find_valid_session(db, old_current_token, touch=False) is None
+    assert find_valid_session(db, new_current_token, touch=False) is not None
+
+
+def test_forced_password_change_blocks_dashboard_but_allows_logout(
+    client: TestClient,
+    db: Session,
+) -> None:
+    create_user(db, must_change_password=True)
+
+    login_response = login(client)
+    assert login_response.status_code == 303
+    assert login_response.headers["location"] == "/account/change-password"
+
+    dashboard = client.get("/dashboard")
+    assert dashboard.status_code == 303
+    assert dashboard.headers["location"] == "/account/change-password"
+
+    account_page = client.get("/account/change-password")
+    assert account_page.status_code == 200
+    assert "Password update required" in account_page.text
+    assert 'data-nav-key="dashboard"' not in account_page.text
+
+    csrf_token = extract_csrf_token(account_page.text)
+    logout_response = client.post(
+        "/logout",
+        data={"csrf_token": csrf_token},
+    )
+    assert logout_response.status_code == 303
+    assert logout_response.headers["location"] == "/login"
+
+
+def test_forced_password_change_clears_flag_and_unlocks_dashboard(
+    client: TestClient,
+    db: Session,
+) -> None:
+    user = create_user(db, must_change_password=True)
+    assert login(client).headers["location"] == "/account/change-password"
+
+    response = submit_password_change(client)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/dashboard"
+    db.refresh(user)
+    assert not user.must_change_password
+    assert client.get("/dashboard").status_code == 200

@@ -38,8 +38,21 @@ def permission_codes(user: User) -> frozenset[str]:
     )
 
 
-def build_navigation(user: User) -> tuple[NavigationGroup, ...]:
+def build_navigation(
+    user: User,
+    *,
+    password_change_only: bool = False,
+) -> tuple[NavigationGroup, ...]:
     """Build visible navigation from permissions, not role names."""
+    account_item = NavigationItem(
+        key="account-security",
+        label="Change Password",
+        icon="security",
+        href="/account/change-password",
+    )
+    if password_change_only:
+        return (NavigationGroup(label="Account", items=(account_item,)),)
+
     granted = permission_codes(user)
     grouped: dict[str, list[NavigationItem]] = {
         "Overview": [
@@ -57,6 +70,8 @@ def build_navigation(user: User) -> tuple[NavigationGroup, ...]:
             grouped.setdefault(group, []).append(
                 NavigationItem(key=key, label=label, icon=icon)
             )
+
+    grouped["System"] = [account_item]
 
     return tuple(
         NavigationGroup(label=label, items=tuple(items))

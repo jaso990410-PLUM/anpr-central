@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Form, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
@@ -17,8 +17,9 @@ from app.core.security import generate_session_token
 from app.db.dependencies import get_db
 from app.dependencies.auth import (
     get_current_user,
-    require_authenticated_user_page,
+    require_authenticated_page_user,
 )
+from app.dependencies.csrf import require_session_csrf
 from app.models.user import User
 from app.services.audit_service import create_audit_log
 from app.services.auth_service import (
@@ -85,13 +86,17 @@ def login(
     request: Request,
     username: Annotated[str, Form(max_length=80)],
     password: Annotated[str, Form(max_length=1024)],
-    csrf_token: Annotated[str, Form()],
+    csrf_token: Annotated[str | None, Form()] = None,
     next: Annotated[str, Form()] = "/dashboard",
     db: Session = Depends(get_db),
 ) -> Response:
     destination = safe_local_redirect(next)
     csrf_nonce = request.cookies.get(settings.csrf_cookie_name)
-    if not csrf_nonce or not verify_csrf_token(csrf_token, csrf_nonce):
+    if (
+        not csrf_nonce
+        or not csrf_token
+        or not verify_csrf_token(csrf_token, csrf_nonce)
+    ):
         return _render_login(
             request,
             next_destination=destination,
@@ -130,6 +135,9 @@ def login(
     )
     db.commit()
 
+    if user.must_change_password:
+        destination = "/account/change-password"
+
     response = RedirectResponse(
         destination,
         status_code=status.HTTP_303_SEE_OTHER,
@@ -142,20 +150,10 @@ def login(
 @router.post("/logout")
 def logout(
     request: Request,
-    csrf_token: Annotated[str, Form()],
-    user: User = Depends(require_authenticated_user_page),
+    raw_session_token: str = Depends(require_session_csrf),
+    user: User = Depends(require_authenticated_page_user),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
-    raw_session_token = request.cookies.get(settings.session_cookie_name)
-    if (
-        not raw_session_token
-        or not verify_csrf_token(csrf_token, raw_session_token)
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid CSRF token",
-        )
-
     revoke_session(db, raw_session_token)
     create_audit_log(
         db,

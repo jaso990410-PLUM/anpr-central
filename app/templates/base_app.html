@@ -75,10 +75,13 @@
                         <strong>{{ user.username }}</strong>
                         <small>{{ user_role_label }}</small>
                     </span>
-                    <form method="post" action="/logout">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                        <button class="button-quiet" type="submit">Sign out</button>
-                    </form>
+                    <div class="operator-actions">
+                        <a class="button-quiet" href="/account/change-password">Change password</a>
+                        <form method="post" action="/logout">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button class="button-quiet" type="submit">Sign out</button>
+                        </form>
+                    </div>
                 </div>
             </header>
 

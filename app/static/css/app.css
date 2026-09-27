@@ -1030,6 +1030,16 @@ a.nav-item:hover {
     flex: 0 0 auto;
 }
 
+.operator-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.operator-actions form {
+    margin: 0;
+}
+
 .operator-avatar {
     display: grid;
     width: 2rem;
@@ -1064,6 +1074,8 @@ a.nav-item:hover {
 }
 
 .button-quiet {
+    display: inline-flex;
+    align-items: center;
     padding: 0.45rem 0.65rem;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -1071,6 +1083,7 @@ a.nav-item:hover {
     background: transparent;
     font-size: 0.7rem;
     font-weight: 650;
+    text-decoration: none;
 }
 
 .button-quiet:hover {
@@ -1421,6 +1434,62 @@ a.nav-item:hover {
     white-space: nowrap;
 }
 
+.account-security-layout {
+    display: grid;
+    max-width: 70rem;
+    grid-template-columns: minmax(0, 1.25fr) minmax(18rem, 0.75fr);
+    gap: 1rem;
+}
+
+.account-security-panel {
+    padding: clamp(1.25rem, 3vw, 2rem);
+}
+
+.account-security-form {
+    max-width: 32rem;
+}
+
+.password-requirements {
+    margin: -0.45rem 0 0;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.security-notice {
+    display: flex;
+    gap: 0.9rem;
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    border: 1px solid rgba(241, 185, 74, 0.28);
+    border-radius: var(--radius-sm);
+    color: #f5ca73;
+    background: rgba(241, 185, 74, 0.08);
+}
+
+.security-notice__icon {
+    display: grid;
+    width: 1.6rem;
+    height: 1.6rem;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    font-family: var(--technical);
+    font-size: 0.72rem;
+    font-weight: 800;
+}
+
+.security-notice strong {
+    color: var(--text);
+    font-size: 0.82rem;
+}
+
+.security-notice p {
+    margin: 0.25rem 0 0;
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+}
+
 /* Responsive behavior */
 
 @media (max-width: 75rem) {
@@ -1429,6 +1498,10 @@ a.nav-item:hover {
     }
 
     .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .account-security-layout {
         grid-template-columns: 1fr;
     }
 }
@@ -1538,6 +1611,10 @@ a.nav-item:hover {
     .context-divider--optional,
     .camera-signal,
     .operator-copy {
+        display: none;
+    }
+
+    .operator-actions > a {
         display: none;
     }
 
