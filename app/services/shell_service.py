@@ -23,7 +23,7 @@ class NavigationGroup:
 
 _PERMISSION_NAVIGATION = (
     ("Management", "sites", "Sites", "site", "sites.view", None),
-    ("Management", "cameras", "Cameras", "camera", "cameras.view", None),
+    ("Management", "cameras", "Cameras", "camera", "cameras.view", "/cameras"),
     ("Management", "users", "Users", "users", "users.view", "/users"),
     ("Monitoring", "recognition", "Recognition History", "recognition", "events.view", None),
     ("Monitoring", "audit", "Audit Log", "audit", "audit.view", "/audit"),

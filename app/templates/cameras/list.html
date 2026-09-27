@@ -1,0 +1,71 @@
+{% extends "base_app.html" %}
+
+{% block title %}Camera Management &middot; ANPR Central{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <p class="eyebrow">Device management</p>
+        <h1>Cameras</h1>
+        <p>Camera identities, configuration, and provisioning readiness.</p>
+    </div>
+    {% if can_manage_cameras %}
+    <a class="button-primary button-primary--compact" href="/cameras/new">Add camera</a>
+    {% endif %}
+</header>
+
+<section class="ops-panel" aria-labelledby="camera-directory-title">
+    <header class="panel-header">
+        <div>
+            <p class="panel-kicker">Configured hardware</p>
+            <h2 id="camera-directory-title">Camera directory</h2>
+        </div>
+        <span class="status-badge status-badge--neutral">{{ cameras|length }} configured</span>
+    </header>
+
+    <div class="table-wrap">
+        <table class="data-table camera-directory-table">
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Name</th>
+                    <th>Site</th>
+                    <th>Direction</th>
+                    <th>Manufacturer / model</th>
+                    <th>IP address</th>
+                    <th>Provisioning</th>
+                    <th>Connection</th>
+                    <th>Enabled</th>
+                    <th>Last seen</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for camera in cameras %}
+                <tr>
+                    <td><a class="table-link data-text" href="/cameras/{{ camera.id }}">{{ camera.code }}</a></td>
+                    <td><strong class="table-primary">{{ camera.name }}</strong></td>
+                    <td><strong>{{ camera.site_code }}</strong><small>{{ camera.site_name }}</small></td>
+                    <td><span class="status-badge status-badge--{{ camera.direction|lower }}">{{ camera.direction }}</span></td>
+                    <td>{{ camera.manufacturer_model }}</td>
+                    <td class="data-text">{{ camera.ip_address or "Not configured" }}</td>
+                    <td><span class="status-badge status-badge--{{ camera.provisioning_state|lower|replace('_', '-') }}">{{ camera.provisioning_state }}</span></td>
+                    <td><span class="status-badge status-badge--{{ camera.connection_state|lower|replace('_', '-') }}">{{ camera.connection_state }}</span></td>
+                    <td><span class="status-badge {% if camera.is_enabled %}status-badge--active{% else %}status-badge--disabled{% endif %}">{{ "Enabled" if camera.is_enabled else "Disabled" }}</span></td>
+                    <td class="data-text">{{ camera.last_seen_display or "Never" }}</td>
+                </tr>
+                {% else %}
+                <tr class="empty-row">
+                    <td colspan="10">
+                        <div class="empty-state">
+                            <span class="empty-state__mark" aria-hidden="true"></span>
+                            <strong>No cameras configured</strong>
+                            <span>Add a camera identity to begin the provisioning lifecycle.</span>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

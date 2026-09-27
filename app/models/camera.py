@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Uuid, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Uuid, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -69,6 +69,13 @@ class Camera(Base):
         Boolean,
         nullable=False,
         default=True,
+    )
+
+    provisioning_state: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="UNPROVISIONED",
+        server_default=text("'UNPROVISIONED'"),
     )
 
     last_seen_at: Mapped[datetime | None] = mapped_column(

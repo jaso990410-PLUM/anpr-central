@@ -1,0 +1,81 @@
+{% extends "base_app.html" %}
+
+{% block title %}{{ camera.code }} &middot; ANPR Central{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <p class="eyebrow">Camera identity</p>
+        <h1>{{ camera.code }}</h1>
+        <p>{{ camera.name }} &middot; {{ camera.site_code }}</p>
+    </div>
+    <span class="status-badge status-badge--{{ camera.connection_state|lower|replace('_', '-') }}">{{ camera.connection_state }}</span>
+</header>
+
+<div class="camera-detail-grid">
+    <section class="ops-panel camera-detail-panel" aria-labelledby="camera-general-title">
+        <header class="panel-header"><div><p class="panel-kicker">Configuration</p><h2 id="camera-general-title">General</h2></div></header>
+        <dl class="detail-list">
+            <div><dt>Site</dt><dd>{{ camera.site_code }} &middot; {{ camera.site_name }}</dd></div>
+            <div><dt>Direction</dt><dd><span class="status-badge status-badge--{{ camera.direction|lower }}">{{ camera.direction }}</span></dd></div>
+            <div><dt>Manufacturer</dt><dd>{{ camera.manufacturer or "Not provided" }}</dd></div>
+            <div><dt>Model</dt><dd>{{ camera.model or "Not provided" }}</dd></div>
+            <div><dt>Serial number</dt><dd class="data-text">{{ camera.serial_number or "Not provided" }}</dd></div>
+            <div><dt>IP address</dt><dd class="data-text">{{ camera.ip_address or "Not configured" }}</dd></div>
+            <div><dt>Enabled</dt><dd>{{ "Yes" if camera.is_enabled else "No" }}</dd></div>
+        </dl>
+    </section>
+
+    <section class="ops-panel camera-detail-panel" aria-labelledby="camera-connection-title">
+        <header class="panel-header"><div><p class="panel-kicker">Provisioning lifecycle</p><h2 id="camera-connection-title">Connection</h2></div></header>
+        <dl class="detail-list">
+            <div><dt>Camera UUID</dt><dd class="data-text">{{ camera.id }}</dd></div>
+            <div><dt>MQTT client identity</dt><dd>Not assigned</dd></div>
+            <div><dt>Provisioning state</dt><dd><span class="status-badge status-badge--{{ camera.provisioning_state|lower|replace('_', '-') }}">{{ camera.provisioning_state }}</span></dd></div>
+            <div><dt>Connection state</dt><dd><span class="status-badge status-badge--{{ camera.connection_state|lower|replace('_', '-') }}">{{ camera.connection_state }}</span></dd></div>
+            <div><dt>Last seen</dt><dd class="data-text">{{ camera.last_seen_display or "Never" }}</dd></div>
+            <div><dt>Last connected</dt><dd>Not available until live MQTT</dd></div>
+            <div><dt>Agent version</dt><dd>Not available until agent reporting</dd></div>
+        </dl>
+    </section>
+</div>
+
+<section class="ops-panel camera-topics-panel" aria-labelledby="camera-topics-title">
+    <header class="panel-header"><div><p class="panel-kicker">Future MQTT contract</p><h2 id="camera-topics-title">Topic namespace</h2></div></header>
+    <div class="topic-grid">
+        <div><span>Status</span><code>{{ camera.status_topic }}</code></div>
+        <div><span>Event</span><code>{{ camera.event_topic }}</code></div>
+        <div><span>Command</span><code>{{ camera.command_topic }}</code></div>
+        <div><span>Whitelist</span><code>{{ camera.whitelist_topic }}</code></div>
+    </div>
+    <p class="panel-note">These topics define identity only. Live MQTT subscription and heartbeat processing are not active in this milestone.</p>
+</section>
+
+<section class="ops-panel camera-actions-panel" aria-labelledby="camera-actions-title">
+    <header class="panel-header"><div><p class="panel-kicker">Administrative controls</p><h2 id="camera-actions-title">Actions</h2></div></header>
+    <div class="camera-actions">
+        {% if can_manage_cameras %}
+            {% if camera.is_enabled %}
+            <form method="post" action="/cameras/{{ camera.id }}/disable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit">Disable camera</button></form>
+            {% else %}
+            <form method="post" action="/cameras/{{ camera.id }}/enable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit">Enable camera</button></form>
+            {% endif %}
+
+            {% if camera.provisioning_state != "CREDENTIALS_REVOKED" %}
+            <form method="post" action="/cameras/{{ camera.id }}/provisioning/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary button-secondary--critical" type="submit">Revoke provisioning</button></form>
+            {% else %}
+            <button class="button-secondary" type="button" disabled>Re-provision unavailable</button>
+            {% endif %}
+        {% else %}
+        <p class="panel-note">You have read-only access to this camera.</p>
+        {% endif %}
+    </div>
+    <p class="panel-note">No Connect or Reconnect action is provided. The RA5 agent will own automatic MQTT connection and reconnection.</p>
+</section>
+
+<div class="state-reference" aria-label="Connection state reference">
+    <span><strong>UNPROVISIONED</strong> agent not configured</span>
+    <span><strong>CONNECTING</strong> awaiting first confirmed connection</span>
+    <span><strong>ONLINE / OFFLINE</strong> reserved for future heartbeat evidence</span>
+</div>
+{% endblock %}

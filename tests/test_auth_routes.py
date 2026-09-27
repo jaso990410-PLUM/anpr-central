@@ -1,4 +1,5 @@
 import re
+import uuid
 from collections.abc import Generator
 from datetime import datetime, timedelta, timezone
 
@@ -23,6 +24,12 @@ from app.models.site import Site
 from app.models.user import User
 from app.models.user_session import UserSession
 from app.services.audit_service import create_audit_log
+from app.services.camera_service import (
+    CREDENTIALS_REVOKED,
+    DISABLED,
+    UNPROVISIONED,
+    CameraService,
+)
 from app.services.session_service import create_session, find_valid_session
 from app.services.user_service import UserService
 
@@ -1774,3 +1781,395 @@ def test_sidebar_visibility_respects_audit_view_permission(
     assert dashboard.status_code == 200
     assert ('data-nav-key="audit"' in dashboard.text) is audit_visible
     assert ('href="/audit"' in dashboard.text) is audit_visible
+
+
+def create_site(db: Session) -> Site:
+    site = Site(
+        code="MAIN",
+        name="Main Site",
+        timezone="Asia/Kuala_Lumpur",
+        is_active=True,
+    )
+    db.add(site)
+    db.commit()
+    return site
+
+
+def submit_new_camera(
+    client: TestClient,
+    site: Site,
+    **overrides: object,
+):
+    page = client.get("/cameras/new")
+    assert page.status_code == 200
+    data: dict[str, object] = {
+        "site_id": str(site.id),
+        "code": "MAIN-ENTRY-01",
+        "name": "Main Entry",
+        "direction": "ENTRY",
+        "manufacturer": "Neutral Vision",
+        "model": "NV-RA5",
+        "serial_number": "SN-10001",
+        "ip_address": "192.0.2.10",
+        "is_enabled": "true",
+        "csrf_token": extract_csrf_token(page.text),
+    }
+    data.update(overrides)
+    return client.post("/cameras/new", data=data)
+
+
+def test_camera_pages_redirect_anonymous_user(
+    client: TestClient,
+    db: Session,
+) -> None:
+    site = create_site(db)
+    camera = Camera(
+        site_id=site.id,
+        code="MAIN-ENTRY-01",
+        name="Main Entry",
+        direction="ENTRY",
+    )
+    db.add(camera)
+    db.commit()
+
+    list_response = client.get("/cameras")
+    detail_response = client.get(f"/cameras/{camera.id}")
+
+    assert list_response.status_code == 303
+    assert list_response.headers["location"] == "/login?next=%2Fcameras"
+    assert detail_response.status_code == 303
+
+
+def test_camera_view_and_manage_permissions_are_enforced(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("cameras.view",))
+    site = create_site(db)
+    camera = Camera(
+        site_id=site.id,
+        code="MAIN-ENTRY-01",
+        name="Main Entry",
+        direction="ENTRY",
+    )
+    db.add(camera)
+    db.commit()
+    assert login(client).status_code == 303
+
+    camera_list = client.get("/cameras")
+    detail = client.get(f"/cameras/{camera.id}")
+    create_page = client.get("/cameras/new")
+    csrf_token = extract_csrf_token(detail.text)
+    create_response = client.post(
+        "/cameras/new",
+        data={
+            "site_id": str(site.id),
+            "code": "SECOND-CAMERA",
+            "name": "Second Camera",
+            "direction": "EXIT",
+            "csrf_token": csrf_token,
+        },
+    )
+    disable_response = client.post(
+        f"/cameras/{camera.id}/disable",
+        data={"csrf_token": csrf_token},
+    )
+
+    assert camera_list.status_code == 200
+    assert detail.status_code == 200
+    assert create_page.status_code == 403
+    assert create_response.status_code == 403
+    assert disable_response.status_code == 403
+    assert 'href="/cameras/new"' not in camera_list.text
+    assert actor.username in detail.text
+
+
+def test_camera_pages_deny_user_without_cameras_view(
+    client: TestClient,
+    db: Session,
+) -> None:
+    create_user(db, permissions=("audit.view",))
+    site = create_site(db)
+    camera = Camera(
+        site_id=site.id,
+        code="MAIN-ENTRY-01",
+        name="Main Entry",
+        direction="ENTRY",
+    )
+    db.add(camera)
+    db.commit()
+    assert login(client).status_code == 303
+
+    assert client.get("/cameras").status_code == 403
+    assert client.get(f"/cameras/{camera.id}").status_code == 403
+
+
+def test_create_camera_stores_configuration_unprovisioned_state_and_audit(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(
+        db,
+        permissions=("cameras.view", "cameras.manage"),
+    )
+    site = create_site(db)
+    assert login(client).status_code == 303
+
+    response = submit_new_camera(client, site)
+
+    assert response.status_code == 303
+    camera = db.scalar(select(Camera).where(Camera.code == "MAIN-ENTRY-01"))
+    assert camera is not None
+    assert response.headers["location"] == f"/cameras/{camera.id}"
+    assert isinstance(camera.id, uuid.UUID)
+    assert camera.site_id == site.id
+    assert camera.name == "Main Entry"
+    assert camera.direction == "ENTRY"
+    assert camera.manufacturer == "Neutral Vision"
+    assert camera.model == "NV-RA5"
+    assert camera.serial_number == "SN-10001"
+    assert camera.ip_address == "192.0.2.10"
+    assert camera.is_enabled
+    assert camera.provisioning_state == UNPROVISIONED
+    assert CameraService(db).camera_detail(camera).connection_state == UNPROVISIONED
+
+    audit = db.scalar(select(AuditLog).where(AuditLog.action == "camera.create"))
+    assert audit is not None
+    assert audit.actor_user_id == actor.id
+    assert audit.entity_id == str(camera.id)
+    assert audit.site_id == site.id
+    assert audit.details["provisioning_state"] == UNPROVISIONED
+    assert "credential" not in str(audit.details).lower()
+    assert "secret" not in str(audit.details).lower()
+
+    camera_list = client.get("/cameras")
+    assert camera_list.status_code == 200
+    assert "MAIN-ENTRY-01" in camera_list.text
+    assert "Neutral Vision / NV-RA5" in camera_list.text
+    assert "192.0.2.10" in camera_list.text
+    assert "Never" in camera_list.text
+    assert 'href="/cameras/new"' in camera_list.text
+
+    detail = client.get(f"/cameras/{camera.id}")
+    assert detail.status_code == 200
+    assert 'status-badge--unprovisioned">UNPROVISIONED' in detail.text
+    assert "Never" in detail.text
+    assert f"anpr/{camera.id}/status" in detail.text
+    assert f"anpr/{camera.id}/event" in detail.text
+    assert f"anpr/{camera.id}/command" in detail.text
+    assert f"anpr/{camera.id}/whitelist" in detail.text
+    assert ">Connect</button>" not in detail.text
+    assert ">Reconnect</button>" not in detail.text
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"code": "main-entry-01", "serial_number": "SN-OTHER"}, "That camera code is already in use."),
+        ({"code": "MAIN-EXIT-02", "serial_number": "sn-10001"}, "That serial number is already in use."),
+        ({"code": "MAIN-EXIT-02", "serial_number": "SN-OTHER", "ip_address": "999.1.2.3"}, "Enter a valid IP address."),
+        ({"code": "MAIN-EXIT-02", "serial_number": "SN-OTHER", "site_id": "not-a-site"}, "Select a valid site."),
+    ],
+)
+def test_create_camera_rejects_duplicates_invalid_ip_and_invalid_site(
+    client: TestClient,
+    db: Session,
+    overrides: dict[str, object],
+    message: str,
+) -> None:
+    create_user(db, permissions=("cameras.manage",))
+    site = create_site(db)
+    db.add(
+        Camera(
+            site_id=site.id,
+            code="MAIN-ENTRY-01",
+            name="Existing Camera",
+            direction="ENTRY",
+            serial_number="SN-10001",
+        )
+    )
+    db.commit()
+    assert login(client).status_code == 303
+
+    response = submit_new_camera(client, site, **overrides)
+
+    assert response.status_code == 400
+    assert message in response.text
+    assert db.scalar(select(Camera).where(Camera.code == "MAIN-EXIT-02")) is None
+
+
+def test_camera_disable_enable_updates_derived_state_and_audits(
+    client: TestClient,
+    db: Session,
+) -> None:
+    create_user(db, permissions=("cameras.view", "cameras.manage"))
+    site = create_site(db)
+    camera = Camera(
+        site_id=site.id,
+        code="MAIN-ENTRY-01",
+        name="Main Entry",
+        direction="ENTRY",
+        is_enabled=True,
+    )
+    db.add(camera)
+    db.commit()
+    assert login(client).status_code == 303
+
+    detail = client.get(f"/cameras/{camera.id}")
+    disable_response = client.post(
+        f"/cameras/{camera.id}/disable",
+        data={"csrf_token": extract_csrf_token(detail.text)},
+    )
+
+    assert disable_response.status_code == 303
+    db.refresh(camera)
+    assert not camera.is_enabled
+    assert CameraService(db).camera_detail(camera).connection_state == DISABLED
+
+    detail = client.get(f"/cameras/{camera.id}")
+    enable_response = client.post(
+        f"/cameras/{camera.id}/enable",
+        data={"csrf_token": extract_csrf_token(detail.text)},
+    )
+
+    assert enable_response.status_code == 303
+    db.refresh(camera)
+    assert camera.is_enabled
+    assert CameraService(db).camera_detail(camera).connection_state == UNPROVISIONED
+    actions = set(
+        db.scalars(
+            select(AuditLog.action).where(
+                AuditLog.action.in_(("camera.disable", "camera.enable"))
+            )
+        ).all()
+    )
+    assert actions == {"camera.disable", "camera.enable"}
+
+
+def test_camera_provisioning_revoke_is_real_and_does_not_fake_connectivity(
+    client: TestClient,
+    db: Session,
+) -> None:
+    create_user(db, permissions=("cameras.view", "cameras.manage"))
+    site = create_site(db)
+    camera = Camera(
+        site_id=site.id,
+        code="MAIN-ENTRY-01",
+        name="Main Entry",
+        direction="ENTRY",
+        is_enabled=True,
+    )
+    db.add(camera)
+    db.commit()
+    assert login(client).status_code == 303
+    detail = client.get(f"/cameras/{camera.id}")
+
+    response = client.post(
+        f"/cameras/{camera.id}/provisioning/revoke",
+        data={"csrf_token": extract_csrf_token(detail.text)},
+    )
+
+    assert response.status_code == 303
+    db.refresh(camera)
+    assert camera.provisioning_state == CREDENTIALS_REVOKED
+    assert CameraService(db).camera_detail(camera).connection_state == CREDENTIALS_REVOKED
+    audit = db.scalar(
+        select(AuditLog).where(
+            AuditLog.action == "camera.provisioning_revoke"
+        )
+    )
+    assert audit is not None
+    audit_text = str(audit.details).lower()
+    assert "password" not in audit_text
+    assert "secret" not in audit_text
+    assert "token" not in audit_text
+    assert "hash" not in audit_text
+    revoked_detail = client.get(f"/cameras/{camera.id}")
+    assert "CREDENTIALS_REVOKED" in revoked_detail.text
+    assert "Re-provision unavailable" in revoked_detail.text
+
+
+@pytest.mark.parametrize(
+    ("path_suffix", "form_data"),
+    [
+        ("disable", {}),
+        ("disable", {"csrf_token": "invalid"}),
+        ("provisioning/revoke", {}),
+        ("provisioning/revoke", {"csrf_token": "invalid"}),
+    ],
+)
+def test_camera_actions_reject_missing_or_invalid_csrf(
+    client: TestClient,
+    db: Session,
+    path_suffix: str,
+    form_data: dict[str, str],
+) -> None:
+    create_user(db, permissions=("cameras.manage",))
+    site = create_site(db)
+    camera = Camera(
+        site_id=site.id,
+        code="MAIN-ENTRY-01",
+        name="Main Entry",
+        direction="ENTRY",
+        is_enabled=True,
+    )
+    db.add(camera)
+    db.commit()
+    assert login(client).status_code == 303
+
+    response = client.post(
+        f"/cameras/{camera.id}/{path_suffix}",
+        data=form_data,
+    )
+
+    assert response.status_code == 403
+    db.refresh(camera)
+    assert camera.is_enabled
+    assert camera.provisioning_state == UNPROVISIONED
+
+
+@pytest.mark.parametrize("csrf_token", [None, "invalid"])
+def test_camera_creation_rejects_missing_or_invalid_csrf(
+    client: TestClient,
+    db: Session,
+    csrf_token: str | None,
+) -> None:
+    create_user(db, permissions=("cameras.manage",))
+    site = create_site(db)
+    assert login(client).status_code == 303
+    data = {
+        "site_id": str(site.id),
+        "code": "MAIN-ENTRY-01",
+        "name": "Main Entry",
+        "direction": "ENTRY",
+    }
+    if csrf_token is not None:
+        data["csrf_token"] = csrf_token
+
+    response = client.post("/cameras/new", data=data)
+
+    assert response.status_code == 403
+    assert db.scalar(select(Camera)) is None
+
+
+@pytest.mark.parametrize(
+    ("permissions", "cameras_visible"),
+    [
+        (("cameras.view",), True),
+        (("audit.view",), False),
+    ],
+)
+def test_sidebar_visibility_respects_cameras_view_permission(
+    client: TestClient,
+    db: Session,
+    permissions: tuple[str, ...],
+    cameras_visible: bool,
+) -> None:
+    create_user(db, permissions=permissions)
+    assert login(client).status_code == 303
+
+    dashboard = client.get("/dashboard")
+
+    assert dashboard.status_code == 200
+    assert ('data-nav-key="cameras"' in dashboard.text) is cameras_visible
+    assert ('href="/cameras"' in dashboard.text) is cameras_visible

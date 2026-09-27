@@ -1,0 +1,92 @@
+{% extends "base_app.html" %}
+
+{% block title %}Add Camera &middot; ANPR Central{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <p class="eyebrow">Device management</p>
+        <h1>Add camera</h1>
+        <p>Create a permanent camera identity and initial configuration.</p>
+    </div>
+    <a class="button-secondary" href="/cameras">Back to cameras</a>
+</header>
+
+<section class="ops-panel user-form-panel" aria-labelledby="new-camera-title">
+    <header class="panel-header">
+        <div>
+            <p class="panel-kicker">Camera onboarding</p>
+            <h2 id="new-camera-title">Camera configuration</h2>
+        </div>
+        <span class="status-badge status-badge--unprovisioned">UNPROVISIONED</span>
+    </header>
+
+    {% if error %}
+    <div class="alert alert--critical" role="alert">
+        <span class="alert-icon" aria-hidden="true">!</span>
+        <span>{{ error }}</span>
+    </div>
+    {% endif %}
+
+    <form class="staff-user-form" method="post" action="/cameras/new">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+        <div class="form-grid">
+            <div class="field-group">
+                <label for="camera-site">Site</label>
+                <select id="camera-site" name="site_id" required>
+                    <option value="">Select a site</option>
+                    {% for site in sites %}
+                    <option value="{{ site.id }}" {% if values.site_id == site.id|string %}selected{% endif %}>{{ site.code }} &middot; {{ site.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field-group">
+                <label for="camera-code">Camera code</label>
+                <input id="camera-code" name="code" maxlength="80" value="{{ values.code or '' }}" placeholder="MAIN-ENTRY-01" required>
+            </div>
+            <div class="field-group">
+                <label for="camera-name">Name</label>
+                <input id="camera-name" name="name" maxlength="150" value="{{ values.name or '' }}" placeholder="Main Entry" required>
+            </div>
+            <div class="field-group">
+                <label for="camera-direction">Direction</label>
+                <input id="camera-direction" name="direction" list="camera-direction-options" maxlength="20" value="{{ values.direction or 'ENTRY' }}" required>
+                <datalist id="camera-direction-options"><option value="ENTRY"><option value="EXIT"></datalist>
+                <small>ENTRY and EXIT are standard; other operational directions remain supported.</small>
+            </div>
+            <div class="field-group">
+                <label for="camera-manufacturer">Manufacturer <span class="muted-text">(optional)</span></label>
+                <input id="camera-manufacturer" name="manufacturer" maxlength="100" value="{{ values.manufacturer or '' }}" placeholder="Vendor-neutral">
+            </div>
+            <div class="field-group">
+                <label for="camera-model">Model <span class="muted-text">(optional)</span></label>
+                <input id="camera-model" name="model" maxlength="100" value="{{ values.model or '' }}">
+            </div>
+            <div class="field-group">
+                <label for="camera-serial">Serial number <span class="muted-text">(optional)</span></label>
+                <input id="camera-serial" name="serial_number" maxlength="100" value="{{ values.serial_number or '' }}">
+            </div>
+            <div class="field-group">
+                <label for="camera-ip">IP address <span class="muted-text">(optional)</span></label>
+                <input id="camera-ip" name="ip_address" maxlength="45" value="{{ values.ip_address or '' }}" placeholder="192.0.2.10">
+            </div>
+        </div>
+
+        <label class="account-state-option">
+            <input type="checkbox" name="is_enabled" value="true" {% if values.is_enabled %}checked{% endif %}>
+            <span><strong>Camera enabled</strong><small>Enabled cameras remain UNPROVISIONED until an RA5 agent is configured.</small></span>
+        </label>
+
+        <div class="provisioning-note">
+            <strong>Connection ownership</strong>
+            <p>The RA5 central agent will initiate its future MQTT connection to Mosquitto. ANPR Central records and displays state; it does not directly connect to the camera.</p>
+        </div>
+
+        <div class="form-actions">
+            <button class="button-primary button-primary--compact" type="submit">Create camera</button>
+            <a class="button-quiet" href="/cameras">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}
