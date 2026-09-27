@@ -363,7 +363,7 @@ input:focus-visible {
     z-index: -1;
     inset: 0;
     overflow: hidden;
-    opacity: 0.72;
+    opacity: 0.8;
 }
 
 .vision-grid {
@@ -412,6 +412,7 @@ input:focus-visible {
     bottom: 19%;
     width: clamp(13rem, 28vw, 23rem);
     aspect-ratio: 2.4 / 1;
+    animation: target-acquire 7s ease-in-out infinite;
 }
 
 .target-corner {
@@ -456,6 +457,171 @@ input:focus-visible {
     color: rgba(69, 214, 232, 0.7);
     font-size: 0.63rem;
     letter-spacing: 0.12em;
+}
+
+.vehicle-front {
+    position: absolute;
+    inset: 12% 9% 9%;
+    overflow: hidden;
+    border: 1px solid rgba(145, 160, 180, 0.22);
+    border-top-color: rgba(145, 160, 180, 0.4);
+    border-radius: 48% 48% 14% 14% / 58% 58% 20% 20%;
+    background:
+        linear-gradient(100deg, transparent 25%, rgba(145, 160, 180, 0.05) 50%, transparent 75%),
+        rgba(17, 26, 39, 0.44);
+}
+
+.vehicle-roof {
+    position: absolute;
+    top: -26%;
+    right: 21%;
+    left: 21%;
+    height: 70%;
+    border: 1px solid rgba(145, 160, 180, 0.3);
+    border-radius: 50% 50% 18% 18%;
+    transform: perspective(8rem) rotateX(-14deg);
+}
+
+.vehicle-windscreen {
+    position: absolute;
+    top: 5%;
+    right: 27%;
+    left: 27%;
+    height: 28%;
+    border: 1px solid rgba(47, 168, 255, 0.17);
+    border-radius: 50% 50% 8% 8%;
+    background: rgba(8, 13, 21, 0.42);
+}
+
+.vehicle-light {
+    position: absolute;
+    top: 42%;
+    width: 16%;
+    height: 8%;
+    border: 1px solid rgba(69, 214, 232, 0.42);
+    border-radius: 50%;
+    background: rgba(69, 214, 232, 0.08);
+}
+
+.vehicle-light--left {
+    left: 10%;
+    transform: rotate(5deg);
+}
+
+.vehicle-light--right {
+    right: 10%;
+    transform: rotate(-5deg);
+}
+
+.vehicle-grille {
+    position: absolute;
+    right: 25%;
+    bottom: 9%;
+    left: 25%;
+    height: 22%;
+    border-top: 1px solid rgba(145, 160, 180, 0.16);
+    border-bottom: 1px solid rgba(145, 160, 180, 0.16);
+    background: repeating-linear-gradient(
+        90deg,
+        transparent 0 0.45rem,
+        rgba(145, 160, 180, 0.08) 0.45rem 0.5rem
+    );
+}
+
+.vehicle-plate {
+    position: absolute;
+    z-index: 2;
+    right: 34%;
+    bottom: 8%;
+    left: 34%;
+    display: grid;
+    min-width: 5.5rem;
+    min-height: 1.45rem;
+    place-items: center;
+    overflow: hidden;
+    border: 1px solid rgba(243, 247, 251, 0.58);
+    border-radius: 0.12rem;
+    color: #f7fafc;
+    background: #05080d;
+    box-shadow: 0 0 0 2px rgba(47, 168, 255, 0.08);
+    font-family: var(--technical);
+    font-size: clamp(0.48rem, 0.8vw, 0.67rem);
+    font-style: normal;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+}
+
+.plate-scan {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -15%;
+    width: 14%;
+    background: rgba(69, 214, 232, 0.58);
+    box-shadow: 0 0 0.65rem rgba(69, 214, 232, 0.7);
+    animation: plate-read 7s ease-in-out infinite;
+}
+
+.recognition-result {
+    position: absolute;
+    top: calc(100% + 0.9rem);
+    right: 0;
+    width: min(14rem, 82vw);
+    padding: 0.65rem 0.75rem;
+    border: 1px solid rgba(55, 201, 120, 0.24);
+    border-left: 2px solid var(--success);
+    border-radius: 0.3rem;
+    opacity: 1;
+    background: rgba(8, 13, 21, 0.84);
+    box-shadow: 0 0.7rem 2rem rgba(0, 0, 0, 0.16);
+    backdrop-filter: blur(8px);
+    transform: translateY(0.2rem);
+    animation: recognition-confirmed 7s ease-in-out infinite;
+}
+
+.recognition-result__label,
+.recognition-result__meta {
+    display: block;
+    color: var(--text-muted);
+    font-family: var(--technical);
+    font-size: 0.52rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.recognition-result__reading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin: 0.22rem 0;
+}
+
+.recognition-result__reading strong {
+    color: var(--text);
+    font-family: var(--technical);
+    font-size: 0.78rem;
+    letter-spacing: 0.06em;
+}
+
+.recognition-result__reading > span {
+    display: flex;
+    align-items: center;
+    gap: 0.32rem;
+    color: #7be6aa;
+    font-size: 0.55rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.recognition-result__reading i {
+    width: 0.35rem;
+    height: 0.35rem;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 0 0.16rem rgba(55, 201, 120, 0.1);
 }
 
 .system-presence {
@@ -637,6 +803,40 @@ input:focus-visible {
     50% {
         opacity: 0.8;
         transform: translateY(18rem);
+    }
+}
+
+@keyframes target-acquire {
+    0%, 22%, 100% {
+        opacity: 0.72;
+    }
+    38%, 86% {
+        opacity: 1;
+    }
+}
+
+@keyframes plate-read {
+    0%, 24% {
+        left: -15%;
+        opacity: 0;
+    }
+    30% {
+        opacity: 1;
+    }
+    48%, 100% {
+        left: 104%;
+        opacity: 0;
+    }
+}
+
+@keyframes recognition-confirmed {
+    0%, 43%, 100% {
+        opacity: 0.85;
+        transform: translateY(0.2rem);
+    }
+    52%, 88% {
+        opacity: 1;
+        transform: translateY(0);
     }
 }
 
@@ -1313,5 +1513,14 @@ a.nav-item:hover {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
+    }
+
+    .recognition-result {
+        opacity: 1;
+        transform: none;
+    }
+
+    .plate-scan {
+        display: none;
     }
 }

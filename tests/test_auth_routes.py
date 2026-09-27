@@ -84,6 +84,8 @@ def test_login_page_loads_with_secure_form(client: TestClient) -> None:
     assert 'name="csrf_token"' in response.text
     assert "Vehicle operations" in response.text
     assert "System online" in response.text
+    assert "VAB 1234" in response.text
+    assert "Recognition preview" in response.text
     assert settings.csrf_cookie_name in response.cookies
 
 
