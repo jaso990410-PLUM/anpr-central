@@ -1707,6 +1707,40 @@ a.nav-item:hover {
     padding-top: 0.2rem;
 }
 
+.security-actions-grid {
+    display: grid;
+    max-width: 64rem;
+    margin-top: 1rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.security-action-card {
+    padding: clamp(1.25rem, 3vw, 1.6rem);
+}
+
+.security-action-card h2 {
+    margin: 0.25rem 0 0.5rem;
+    font-size: 1rem;
+}
+
+.security-action-card header > p:last-child {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    line-height: 1.6;
+}
+
+.security-action-form {
+    display: grid;
+    gap: 1rem;
+    margin-top: 1.25rem;
+}
+
+.security-action-form .button-secondary {
+    justify-self: start;
+}
+
 /* Responsive behavior */
 
 @media (max-width: 75rem) {
@@ -1869,7 +1903,8 @@ a.nav-item:hover {
     }
 
     .form-grid,
-    .role-selector__grid {
+    .role-selector__grid,
+    .security-actions-grid {
         grid-template-columns: 1fr;
     }
 

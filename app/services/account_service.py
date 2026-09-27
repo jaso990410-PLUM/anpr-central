@@ -8,6 +8,22 @@ class PasswordChangeError(ValueError):
     """A safe validation error that can be shown in the account form."""
 
 
+def validate_password_pair(
+    password: str,
+    confirmation: str,
+    *,
+    singular_label: str = "New password",
+    plural_label: str = "New passwords",
+) -> None:
+    """Apply the shared password length and confirmation policy."""
+    if len(password) < 12:
+        raise PasswordChangeError(
+            f"{singular_label} must contain at least 12 characters."
+        )
+    if password != confirmation:
+        raise PasswordChangeError(f"{plural_label} do not match.")
+
+
 def change_password(
     db: Session,
     user: User,
@@ -20,13 +36,7 @@ def change_password(
     if not verify_password(current_password, user.password_hash):
         raise PasswordChangeError("Current password is incorrect.")
 
-    if len(new_password) < 12:
-        raise PasswordChangeError(
-            "New password must contain at least 12 characters."
-        )
-
-    if new_password != confirm_password:
-        raise PasswordChangeError("New passwords do not match.")
+    validate_password_pair(new_password, confirm_password)
 
     if verify_password(new_password, user.password_hash):
         raise PasswordChangeError(

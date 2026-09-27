@@ -14,6 +14,7 @@ from app.models.associations import user_roles
 from app.models.role import Role
 from app.models.site import Site
 from app.models.user import User
+from app.services.account_service import PasswordChangeError, validate_password_pair
 from app.services.session_service import revoke_all_user_sessions
 
 
@@ -44,6 +45,12 @@ class UserUpdateResult:
     updated_fields: tuple[str, ...]
     activation_action: str | None
     roles_changed: bool
+    sessions_revoked: int
+
+
+@dataclass(frozen=True)
+class PasswordResetResult:
+    user: User
     sessions_revoked: int
 
 
@@ -133,12 +140,7 @@ class UserService:
                 raise UserValidationError("Email must contain at most 255 characters.")
             if not _EMAIL_PATTERN.fullmatch(clean_email):
                 raise UserValidationError("Enter a valid email address.")
-        if len(temporary_password) < 12:
-            raise UserValidationError(
-                "Temporary password must contain at least 12 characters."
-            )
-        if temporary_password != confirm_password:
-            raise UserValidationError("Temporary passwords do not match.")
+        self._validate_temporary_password(temporary_password, confirm_password)
         if self.username_exists(clean_username):
             raise UserValidationError("That username is already in use.")
         if clean_email is not None and self.email_exists(clean_email):
@@ -253,6 +255,48 @@ class UserService:
             roles_changed=roles_changed,
             sessions_revoked=sessions_revoked,
         )
+
+    def reset_password(
+        self,
+        target: User,
+        *,
+        actor_user_id: UUID,
+        temporary_password: str,
+        confirm_password: str,
+    ) -> PasswordResetResult:
+        if target.id == actor_user_id:
+            raise UserValidationError(
+                "Use Change Password to update your own password."
+            )
+        self._validate_temporary_password(temporary_password, confirm_password)
+        target.password_hash = hash_password(temporary_password)
+        target.must_change_password = True
+        self.db.flush()
+        sessions_revoked = revoke_all_user_sessions(self.db, target.id)
+        return PasswordResetResult(
+            user=target,
+            sessions_revoked=sessions_revoked,
+        )
+
+    def unlock_user(self, target: User) -> None:
+        target.failed_login_count = 0
+        target.locked_until = None
+        self.db.flush()
+
+    @staticmethod
+    def _validate_temporary_password(
+        password: str,
+        confirmation: str,
+    ) -> None:
+        try:
+            validate_password_pair(
+                password,
+                confirmation,
+                singular_label="Temporary password",
+                plural_label="Temporary passwords",
+            )
+        except PasswordChangeError as error:
+            raise UserValidationError(str(error)) from error
 
     def _validate_edit_profile(
         self,

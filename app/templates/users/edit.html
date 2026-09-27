@@ -75,12 +75,50 @@
         {% if target_user.id == user.id %}
         <p class="form-note">You are editing your own account. ANPR Central will not allow you to disable it.</p>
         {% endif %}
-        <p class="form-note">Password changes and account unlocking are managed separately and are not available here.</p>
-
         <div class="form-actions">
             <button class="button-primary button-primary--compact" type="submit">Save changes</button>
             <a class="button-quiet" href="/users">Cancel</a>
         </div>
     </form>
+</section>
+
+<section class="security-actions-grid" aria-label="Account security actions">
+    <article class="ops-panel security-action-card">
+        <header>
+            <p class="panel-kicker">Credential recovery</p>
+            <h2>Reset temporary password</h2>
+            <p>Creates a securely stored temporary password, revokes active sessions, and requires a password change at the next sign-in.</p>
+        </header>
+
+        {% if target_user.id == user.id %}
+        <p class="form-note">Use Change Password in the operator menu to update your own password.</p>
+        {% else %}
+        <form class="security-action-form" method="post" action="/users/{{ target_user.id }}/reset-password">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="field-group">
+                <label for="reset-temporary-password">New temporary password</label>
+                <input id="reset-temporary-password" name="temporary_password" type="password" minlength="12" maxlength="1024" autocomplete="new-password" required>
+                <small>At least 12 characters. The value is never displayed or logged.</small>
+            </div>
+            <div class="field-group">
+                <label for="reset-confirm-password">Confirm temporary password</label>
+                <input id="reset-confirm-password" name="confirm_password" type="password" minlength="12" maxlength="1024" autocomplete="new-password" required>
+            </div>
+            <button class="button-secondary" type="submit">Reset password</button>
+        </form>
+        {% endif %}
+    </article>
+
+    <article class="ops-panel security-action-card">
+        <header>
+            <p class="panel-kicker">Account recovery</p>
+            <h2>Unlock account</h2>
+            <p>Clears the current sign-in lock without changing the user&rsquo;s password or roles.</p>
+        </header>
+        <form class="security-action-form" method="post" action="/users/{{ target_user.id }}/unlock">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button-secondary" type="submit">Unlock account</button>
+        </form>
+    </article>
 </section>
 {% endblock %}

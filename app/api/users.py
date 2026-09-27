@@ -296,3 +296,85 @@ def update_user(
     if result.roles_changed and result.user.id == user.id:
         delete_session_cookie(response)
     return response
+
+
+@router.post("/{user_id}/reset-password", response_class=HTMLResponse)
+def reset_user_password(
+    user_id: UUID,
+    request: Request,
+    temporary_password: Annotated[str, Form(max_length=1024)],
+    confirm_password: Annotated[str, Form(max_length=1024)],
+    user: User = Depends(require_page_permission("users.manage")),
+    raw_session_token: str = Depends(require_session_csrf),
+    db: Session = Depends(get_db),
+) -> Response:
+    service = UserService(db)
+    target_user = service.get_user(user_id)
+    if target_user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    try:
+        result = service.reset_password(
+            target_user,
+            actor_user_id=user.id,
+            temporary_password=temporary_password,
+            confirm_password=confirm_password,
+        )
+    except UserValidationError as error:
+        return _render_edit_form(
+            request,
+            db,
+            user,
+            raw_session_token,
+            target_user,
+            error=str(error),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    create_audit_log(
+        db,
+        action="user.password_reset",
+        actor_user_id=user.id,
+        entity_type="user",
+        entity_id=str(result.user.id),
+        details={
+            "username": result.user.username,
+            "sessions_revoked": result.sessions_revoked,
+        },
+        ip_address=request.client.host if request.client else None,
+    )
+    db.commit()
+    return RedirectResponse(
+        f"/users/{result.user.id}/edit",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/{user_id}/unlock")
+def unlock_user(
+    user_id: UUID,
+    request: Request,
+    user: User = Depends(require_page_permission("users.manage")),
+    _raw_session_token: str = Depends(require_session_csrf),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    service = UserService(db)
+    target_user = service.get_user(user_id)
+    if target_user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    service.unlock_user(target_user)
+    create_audit_log(
+        db,
+        action="user.unlock",
+        actor_user_id=user.id,
+        entity_type="user",
+        entity_id=str(target_user.id),
+        details={"username": target_user.username},
+        ip_address=request.client.host if request.client else None,
+    )
+    db.commit()
+    return RedirectResponse(
+        f"/users/{target_user.id}/edit",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )

@@ -1076,7 +1076,9 @@ def test_edit_user_page_uses_database_roles_and_read_only_identity(
     assert str(target_role.id) in response.text
     assert f'value="{target.username}" readonly' in response.text
     assert 'name="username"' not in response.text
-    assert 'type="password"' not in response.text
+    assert 'name="temporary_password" type="password"' in response.text
+    assert 'name="password_hash"' not in response.text
+    assert "$argon2" not in response.text
 
 
 def test_edit_user_updates_profile_roles_and_audits_safely(
@@ -1306,3 +1308,283 @@ def test_edit_user_rejects_missing_or_invalid_csrf(
     assert response.status_code == 403
     db.refresh(target)
     assert target.full_name == "Original Operator"
+
+
+def submit_password_reset(
+    client: TestClient,
+    target: User,
+    *,
+    temporary_password: str = "replacement secure passphrase",
+    confirm_password: str = "replacement secure passphrase",
+):
+    page = client.get(f"/users/{target.id}/edit")
+    assert page.status_code == 200
+    return client.post(
+        f"/users/{target.id}/reset-password",
+        data={
+            "temporary_password": temporary_password,
+            "confirm_password": confirm_password,
+            "csrf_token": extract_csrf_token(page.text),
+        },
+    )
+
+
+def test_password_reset_and_unlock_require_users_manage(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("users.view",))
+    role = create_role(db, "operator", "Operator")
+    target = create_staff_user(db, role)
+    original_hash = target.password_hash
+    target.failed_login_count = 4
+    target.locked_until = datetime.now(timezone.utc) + timedelta(minutes=15)
+    db.commit()
+    assert login(client).status_code == 303
+    csrf_token = extract_csrf_token(client.get("/dashboard").text)
+
+    reset_response = client.post(
+        f"/users/{target.id}/reset-password",
+        data={
+            "temporary_password": "replacement secure passphrase",
+            "confirm_password": "replacement secure passphrase",
+            "csrf_token": csrf_token,
+        },
+    )
+    unlock_response = client.post(
+        f"/users/{target.id}/unlock",
+        data={"csrf_token": csrf_token},
+    )
+
+    assert reset_response.status_code == 403
+    assert unlock_response.status_code == 403
+    db.refresh(target)
+    assert target.password_hash == original_hash
+    assert target.locked_until is not None
+
+
+def test_valid_password_reset_hashes_password_forces_change_and_revokes_sessions(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("users.manage",))
+    role = create_role(db, "operator", "Operator")
+    target = create_staff_user(db, role)
+    original_hash = target.password_hash
+    first_token, _ = create_session(db, target)
+    second_token, _ = create_session(db, target)
+    db.commit()
+    assert login(client).status_code == 303
+
+    response = submit_password_reset(client, target)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/users/{target.id}/edit"
+    db.expire_all()
+    reset_user = db.get(User, target.id)
+    assert reset_user is not None
+    assert reset_user.password_hash != original_hash
+    assert reset_user.password_hash.startswith("$argon2")
+    assert verify_password("replacement secure passphrase", reset_user.password_hash)
+    assert reset_user.must_change_password
+    assert find_valid_session(db, first_token, touch=False) is None
+    assert find_valid_session(db, second_token, touch=False) is None
+
+    audit = db.scalar(
+        select(AuditLog).where(AuditLog.action == "user.password_reset")
+    )
+    assert audit is not None
+    assert audit.actor_user_id == actor.id
+    assert audit.entity_id == str(target.id)
+    assert audit.details == {
+        "username": target.username,
+        "sessions_revoked": 2,
+    }
+    audit_text = str(audit.details).lower()
+    assert "replacement secure passphrase" not in audit_text
+    assert reset_user.password_hash not in audit_text
+    assert "token" not in audit_text
+    assert "csrf" not in audit_text
+
+
+@pytest.mark.parametrize(
+    ("temporary_password", "confirm_password", "message"),
+    [
+        (
+            "short pass",
+            "short pass",
+            "Temporary password must contain at least 12 characters.",
+        ),
+        (
+            "replacement secure passphrase",
+            "different secure passphrase",
+            "Temporary passwords do not match.",
+        ),
+    ],
+)
+def test_password_reset_rejects_short_or_mismatched_password(
+    client: TestClient,
+    db: Session,
+    temporary_password: str,
+    confirm_password: str,
+    message: str,
+) -> None:
+    create_user(db, permissions=("users.manage",))
+    role = create_role(db, "operator", "Operator")
+    target = create_staff_user(db, role)
+    original_hash = target.password_hash
+    assert login(client).status_code == 303
+
+    response = submit_password_reset(
+        client,
+        target,
+        temporary_password=temporary_password,
+        confirm_password=confirm_password,
+    )
+
+    assert response.status_code == 400
+    assert message in response.text
+    assert temporary_password not in response.text
+    db.refresh(target)
+    assert target.password_hash == original_hash
+    assert db.scalar(
+        select(AuditLog).where(AuditLog.action == "user.password_reset")
+    ) is None
+
+
+def test_reset_user_can_login_and_is_forced_to_change_password(
+    client: TestClient,
+    db: Session,
+) -> None:
+    create_user(db, permissions=("users.manage",))
+    role = create_role(db, "operator", "Operator")
+    target = create_staff_user(db, role)
+    assert login(client).status_code == 303
+    assert submit_password_reset(client, target).status_code == 303
+
+    edit_page = client.get(f"/users/{target.id}/edit")
+    logout_token = extract_csrf_token(edit_page.text)
+    assert client.post("/logout", data={"csrf_token": logout_token}).status_code == 303
+
+    old_password_response = login(
+        client,
+        username=target.username,
+        password="operator secure passphrase",
+    )
+    reset_password_response = login(
+        client,
+        username=target.username,
+        password="replacement secure passphrase",
+    )
+
+    assert old_password_response.status_code == 401
+    assert reset_password_response.status_code == 303
+    assert reset_password_response.headers["location"] == "/account/change-password"
+    assert client.get("/dashboard").headers["location"] == "/account/change-password"
+
+
+def test_unlock_clears_lock_state_and_audits_without_changing_password(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("users.manage",))
+    role = create_role(db, "operator", "Operator")
+    target = create_staff_user(db, role)
+    target.failed_login_count = 5
+    target.locked_until = datetime.now(timezone.utc) + timedelta(minutes=15)
+    original_hash = target.password_hash
+    db.commit()
+    assert login(client).status_code == 303
+    page = client.get(f"/users/{target.id}/edit")
+
+    response = client.post(
+        f"/users/{target.id}/unlock",
+        data={"csrf_token": extract_csrf_token(page.text)},
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/users/{target.id}/edit"
+    db.refresh(target)
+    assert target.failed_login_count == 0
+    assert target.locked_until is None
+    assert target.password_hash == original_hash
+    audit = db.scalar(select(AuditLog).where(AuditLog.action == "user.unlock"))
+    assert audit is not None
+    assert audit.actor_user_id == actor.id
+    assert audit.entity_id == str(target.id)
+    assert audit.details == {"username": target.username}
+    assert original_hash not in str(audit.details)
+
+
+@pytest.mark.parametrize(
+    ("action", "csrf_token"),
+    [
+        ("reset-password", None),
+        ("reset-password", "invalid"),
+        ("unlock", None),
+        ("unlock", "invalid"),
+    ],
+)
+def test_password_reset_and_unlock_reject_missing_or_invalid_csrf(
+    client: TestClient,
+    db: Session,
+    action: str,
+    csrf_token: str | None,
+) -> None:
+    create_user(db, permissions=("users.manage",))
+    role = create_role(db, "operator", "Operator")
+    target = create_staff_user(db, role)
+    target.failed_login_count = 5
+    target.locked_until = datetime.now(timezone.utc) + timedelta(minutes=15)
+    original_hash = target.password_hash
+    db.commit()
+    assert login(client).status_code == 303
+    data = {
+        "temporary_password": "replacement secure passphrase",
+        "confirm_password": "replacement secure passphrase",
+    }
+    if csrf_token is not None:
+        data["csrf_token"] = csrf_token
+
+    response = client.post(f"/users/{target.id}/{action}", data=data)
+
+    assert response.status_code == 403
+    db.refresh(target)
+    assert target.password_hash == original_hash
+    assert target.failed_login_count == 5
+    assert target.locked_until is not None
+
+
+def test_administrator_cannot_reset_own_password(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("users.manage",))
+    original_hash = actor.password_hash
+    assert login(client).status_code == 303
+
+    response = client.post(
+        f"/users/{actor.id}/reset-password",
+        data={
+            "temporary_password": "replacement secure passphrase",
+            "confirm_password": "replacement secure passphrase",
+            "csrf_token": extract_csrf_token(
+                client.get(f"/users/{actor.id}/edit").text
+            ),
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Use Change Password" in response.text
+    db.refresh(actor)
+    assert actor.password_hash == original_hash
+
+
+@pytest.mark.parametrize("path", ["/forgot-password", "/reset-password"])
+def test_public_password_reset_routes_do_not_exist(
+    client: TestClient,
+    path: str,
+) -> None:
+    assert client.get(path).status_code == 404
+    login_page = client.get("/login")
+    assert f'href="{path}"' not in login_page.text
