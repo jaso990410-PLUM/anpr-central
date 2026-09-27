@@ -1,0 +1,18 @@
+{% extends "base_public.html" %}
+
+{% block title %}Dashboard · ANPR Central{% endblock %}
+
+{% block content %}
+<section class="dashboard-card">
+    <div>
+        <p class="eyebrow">ANPR Central</p>
+        <h1>Dashboard</h1>
+        <p>Welcome, {{ user.full_name }}. Your secure session is active.</p>
+    </div>
+
+    <form method="post" action="/logout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="button-secondary">Sign Out</button>
+    </form>
+</section>
+{% endblock %}

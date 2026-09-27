@@ -34,8 +34,8 @@ def create_session(
     user_session = UserSession(
         user_id=user.id,
         token_hash=hash_session_token(raw_token),
-        ip_address=ip_address,
-        user_agent=user_agent,
+        ip_address=ip_address[:45] if ip_address else None,
+        user_agent=user_agent[:500] if user_agent else None,
         created_at=issued_at,
         last_seen_at=issued_at,
         expires_at=issued_at

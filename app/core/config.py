@@ -17,6 +17,8 @@ class Settings(BaseSettings):
 
     secret_key: str = Field(min_length=32)
     session_cookie_name: str = "anpr_session"
+    csrf_cookie_name: str = "anpr_login_csrf"
+    csrf_lifetime_minutes: int = Field(default=30, gt=0)
     session_lifetime_minutes: int = Field(default=480, gt=0)
     session_idle_minutes: int = Field(default=30, gt=0)
     cookie_secure: bool = False

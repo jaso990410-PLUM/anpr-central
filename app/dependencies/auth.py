@@ -11,6 +11,10 @@ from app.models.user import User
 from app.services.session_service import find_valid_session, revoke_session
 
 
+class PageAuthenticationRequired(Exception):
+    """Raised when a server-rendered page needs a login redirect."""
+
+
 def get_current_user(
     request: Request,
     db: Session = Depends(get_db),
@@ -47,6 +51,14 @@ def require_authenticated_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
         )
+    return user
+
+
+def require_authenticated_user_page(
+    user: User | None = Depends(get_current_user),
+) -> User:
+    if user is None:
+        raise PageAuthenticationRequired
     return user
 
 

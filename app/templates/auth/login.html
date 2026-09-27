@@ -1,0 +1,46 @@
+{% extends "base_public.html" %}
+
+{% block title %}Sign in · ANPR Central{% endblock %}
+
+{% block content %}
+<section class="auth-card" aria-labelledby="login-title">
+    <header class="auth-header">
+        <p class="eyebrow">Secure operations portal</p>
+        <h1 id="login-title">ANPR Central</h1>
+        <p>Sign in with your internal account to continue.</p>
+    </header>
+
+    {% if error %}
+    <div class="alert" role="alert">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="/login" class="auth-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="{{ next_destination }}">
+
+        <label for="username">Username</label>
+        <input
+            id="username"
+            name="username"
+            type="text"
+            maxlength="80"
+            autocomplete="username"
+            autocapitalize="none"
+            required
+            autofocus
+        >
+
+        <label for="password">Password</label>
+        <input
+            id="password"
+            name="password"
+            type="password"
+            maxlength="1024"
+            autocomplete="current-password"
+            required
+        >
+
+        <button type="submit">Sign In</button>
+    </form>
+</section>
+{% endblock %}

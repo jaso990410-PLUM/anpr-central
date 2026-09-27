@@ -23,7 +23,7 @@ def verify_csrf_token(csrf_token: str, raw_session_token: str) -> bool:
     try:
         session_hash = _serializer().loads(
             csrf_token,
-            max_age=settings.session_lifetime_minutes * 60,
+            max_age=settings.csrf_lifetime_minutes * 60,
         )
     except (BadSignature, SignatureExpired):
         return False
