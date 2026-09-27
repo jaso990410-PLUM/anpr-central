@@ -1,46 +1,104 @@
 {% extends "base_public.html" %}
 
-{% block title %}Sign in · ANPR Central{% endblock %}
+{% block title %}Secure Sign In &middot; ANPR Central{% endblock %}
+{% block body_class %}login-page{% endblock %}
+{% block main_class %}login-shell{% endblock %}
 
 {% block content %}
-<section class="auth-card" aria-labelledby="login-title">
-    <header class="auth-header">
-        <p class="eyebrow">Secure operations portal</p>
-        <h1 id="login-title">ANPR Central</h1>
-        <p>Sign in with your internal account to continue.</p>
-    </header>
+<section class="login-identity" aria-labelledby="product-title">
+    <div class="login-brand">
+        <span class="brand-mark brand-mark--large" aria-hidden="true"><span></span></span>
+        <div class="brand-copy brand-copy--large">
+            <strong>ANPR</strong>
+            <small>CENTRAL</small>
+        </div>
+    </div>
 
-    {% if error %}
-    <div class="alert" role="alert">{{ error }}</div>
-    {% endif %}
+    <div class="identity-message">
+        <p class="eyebrow">Intelligent access control</p>
+        <h1 id="product-title">Vehicle operations,<br>clearly in view.</h1>
+        <p>A secure command surface for license plate recognition, site access, and camera operations.</p>
+    </div>
 
-    <form method="post" action="/login" class="auth-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="next" value="{{ next_destination }}">
+    <div class="vision-field" aria-hidden="true">
+        <div class="vision-grid"></div>
+        <div class="road-lane road-lane--left"></div>
+        <div class="road-lane road-lane--right"></div>
+        <div class="scan-line"></div>
+        <div class="scan-target">
+            <span class="target-corner target-corner--tl"></span>
+            <span class="target-corner target-corner--tr"></span>
+            <span class="target-corner target-corner--bl"></span>
+            <span class="target-corner target-corner--br"></span>
+            <span class="target-label">MAIN-ENTRY-01</span>
+        </div>
+    </div>
 
-        <label for="username">Username</label>
-        <input
-            id="username"
-            name="username"
-            type="text"
-            maxlength="80"
-            autocomplete="username"
-            autocapitalize="none"
-            required
-            autofocus
-        >
+    <div class="system-presence">
+        <span class="status-dot status-dot--online"></span>
+        <span>System online</span>
+        <span class="presence-divider"></span>
+        <span>Secure operations gateway</span>
+    </div>
+</section>
 
-        <label for="password">Password</label>
-        <input
-            id="password"
-            name="password"
-            type="password"
-            maxlength="1024"
-            autocomplete="current-password"
-            required
-        >
+<section class="login-access" aria-labelledby="login-title">
+    <div class="login-panel">
+        <header class="login-header">
+            <p class="eyebrow">Authorized personnel</p>
+            <h2 id="login-title">Sign in</h2>
+            <p>Enter your internal account credentials to access the operations console.</p>
+        </header>
 
-        <button type="submit">Sign In</button>
-    </form>
+        {% if error %}
+        <div class="alert alert--critical" role="alert">
+            <span class="alert-icon" aria-hidden="true">!</span>
+            <span>{{ error }}</span>
+        </div>
+        {% endif %}
+
+        <form method="post" action="/login" class="auth-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="next" value="{{ next_destination }}">
+
+            <div class="field-group">
+                <label for="username">Username</label>
+                <input
+                    id="username"
+                    name="username"
+                    type="text"
+                    maxlength="80"
+                    autocomplete="username"
+                    autocapitalize="none"
+                    placeholder="Enter username"
+                    required
+                    autofocus
+                >
+            </div>
+
+            <div class="field-group">
+                <label for="password">Password</label>
+                <input
+                    id="password"
+                    name="password"
+                    type="password"
+                    maxlength="1024"
+                    autocomplete="current-password"
+                    placeholder="Enter password"
+                    required
+                >
+            </div>
+
+            <button class="button-primary" type="submit">
+                <span>Sign in to console</span>
+                <span aria-hidden="true">&rarr;</span>
+            </button>
+        </form>
+
+        <footer class="login-footer">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5.1 3.4 9.8 8 11 4.6-1.2 8-5.9 8-11V5l-8-3Zm0 2.1 6 2.2V11c0 3.9-2.4 7.7-6 8.9-3.6-1.2-6-5-6-8.9V6.3l6-2.2Zm-1 4.4h2v4h-2v-4Zm0 5.5h2v2h-2v-2Z"/></svg>
+            <span>Protected by server-side session security</span>
+        </footer>
+    </div>
 </section>
 {% endblock %}

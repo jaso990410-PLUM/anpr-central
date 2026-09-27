@@ -82,6 +82,8 @@ def test_login_page_loads_with_secure_form(client: TestClient) -> None:
     assert 'name="username"' in response.text
     assert 'name="password"' in response.text
     assert 'name="csrf_token"' in response.text
+    assert "Vehicle operations" in response.text
+    assert "System online" in response.text
     assert settings.csrf_cookie_name in response.cookies
 
 
@@ -150,6 +152,9 @@ def test_correct_login_creates_hashed_session_and_cookie(
     dashboard = client.get("/dashboard")
     assert dashboard.status_code == 200
     assert "System Administrator" in dashboard.text
+    assert "Operations overview" in dashboard.text
+    assert "Recognition activity" in dashboard.text
+    assert "System readiness" in dashboard.text
 
     root = client.get("/")
     assert root.status_code == 303

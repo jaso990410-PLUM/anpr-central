@@ -1,18 +1,142 @@
-{% extends "base_public.html" %}
+{% extends "base_app.html" %}
 
-{% block title %}Dashboard · ANPR Central{% endblock %}
+{% block title %}Operations Dashboard &middot; ANPR Central{% endblock %}
 
 {% block content %}
-<section class="dashboard-card">
+<header class="page-header">
     <div>
-        <p class="eyebrow">ANPR Central</p>
+        <p class="eyebrow">Operations overview</p>
         <h1>Dashboard</h1>
-        <p>Welcome, {{ user.full_name }}. Your secure session is active.</p>
+        <p>Welcome back, {{ user.full_name }}. Your secure session is active.</p>
     </div>
+    <div class="page-state">
+        <span class="status-badge status-badge--online">
+            <span class="status-dot status-dot--online"></span>
+            Operational
+        </span>
+    </div>
+</header>
 
-    <form method="post" action="/logout">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button type="submit" class="button-secondary">Sign Out</button>
-    </form>
+<section class="metric-grid" aria-label="Operational summary">
+    <article class="metric-card">
+        <div class="metric-card__topline">
+            <span class="metric-label">Cameras</span>
+            <span class="metric-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 7h11a3 3 0 0 1 3 3v1l3-2v8l-3-2v1a3 3 0 0 1-3 3H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Zm0 2v8h11a1 1 0 0 0 1-1v-6a1 1 0 0 0-1-1H4Z"/></svg>
+            </span>
+        </div>
+        <strong class="metric-value">{{ summary.camera_count }}</strong>
+        <div class="metric-status">
+            <span class="status-dot {% if summary.enabled_camera_count %}status-dot--online{% else %}status-dot--neutral{% endif %}"></span>
+            <span class="data-text">{{ summary.enabled_camera_count }}</span> enabled
+        </div>
+    </article>
+
+    <article class="metric-card">
+        <div class="metric-card__topline">
+            <span class="metric-label">Site network</span>
+            <span class="metric-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M5 20V6l7-3 7 3v14h-5v-5h-4v5H5Zm2-2h1v-5h8v5h1V7.3l-5-2.1-5 2.1V18Z"/></svg>
+            </span>
+        </div>
+        <strong class="metric-value metric-value--code">{{ summary.site_context }}</strong>
+        <div class="metric-status">
+            <span class="status-dot {% if summary.active_site_count %}status-dot--online{% else %}status-dot--warning{% endif %}"></span>
+            <span class="data-text">{{ summary.active_site_count }}/{{ summary.site_count }}</span> active
+        </div>
+    </article>
+
+    <article class="metric-card">
+        <div class="metric-card__topline">
+            <span class="metric-label">Users</span>
+            <span class="metric-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0-2a2 2 0 1 1 0-4 2 2 0 0 1 0 4Zm-7 9a7 7 0 0 1 14 0v1H5v-1Zm2.2-1h9.6a5 5 0 0 0-9.6 0Z"/></svg>
+            </span>
+        </div>
+        <strong class="metric-value">{{ summary.user_count }}</strong>
+        <div class="metric-status">
+            <span class="status-dot {% if summary.active_session_count %}status-dot--online{% else %}status-dot--neutral{% endif %}"></span>
+            <span class="data-text">{{ summary.active_session_count }}</span> active now
+        </div>
+    </article>
+
+    <article class="metric-card metric-card--accent">
+        <div class="metric-card__topline">
+            <span class="metric-label">Security</span>
+            <span class="metric-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5.1 3.4 9.8 8 11 4.6-1.2 8-5.9 8-11V5l-8-3Zm0 2.1 6 2.2V11c0 3.9-2.4 7.7-6 8.9-3.6-1.2-6-5-6-8.9V6.3l6-2.2Zm-1 4.4h2v4h-2v-4Zm0 5.5h2v2h-2v-2Z"/></svg>
+            </span>
+        </div>
+        <strong class="metric-value metric-value--code">SESSION</strong>
+        <div class="metric-status">
+            <span class="status-dot status-dot--online"></span>
+            Authenticated
+        </div>
+    </article>
+</section>
+
+<section class="dashboard-grid">
+    <article class="ops-panel activity-panel">
+        <header class="panel-header">
+            <div>
+                <p class="panel-kicker">Live operations</p>
+                <h2>Recognition activity</h2>
+            </div>
+            <span class="status-badge status-badge--neutral">Not connected</span>
+        </header>
+
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Plate</th>
+                        <th>Camera</th>
+                        <th>Direction</th>
+                        <th>Confidence</th>
+                        <th>Time</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="empty-row">
+                        <td colspan="6">
+                            <div class="empty-state">
+                                <span class="empty-state__mark" aria-hidden="true"></span>
+                                <strong>Recognition feed awaiting integration</strong>
+                                <span>ANPR event processing is intentionally not enabled in this phase.</span>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </article>
+
+    <aside class="ops-panel readiness-panel">
+        <header class="panel-header">
+            <div>
+                <p class="panel-kicker">Platform status</p>
+                <h2>System readiness</h2>
+            </div>
+        </header>
+
+        <ul class="readiness-list">
+            <li>
+                <span class="readiness-icon status-dot--online">DB</span>
+                <span><strong>Database</strong><small>PostgreSQL connected</small></span>
+                <span class="status-badge status-badge--online">Online</span>
+            </li>
+            <li>
+                <span class="readiness-icon status-dot--online">AU</span>
+                <span><strong>Authentication</strong><small>Server-side sessions</small></span>
+                <span class="status-badge status-badge--online">Active</span>
+            </li>
+            <li>
+                <span class="readiness-icon status-dot--neutral">AI</span>
+                <span><strong>Recognition engine</strong><small>Future integration</small></span>
+                <span class="status-badge status-badge--neutral">Standby</span>
+            </li>
+        </ul>
+    </aside>
 </section>
 {% endblock %}

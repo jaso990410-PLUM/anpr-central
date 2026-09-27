@@ -2,14 +2,17 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.csrf import generate_csrf_token
+from app.db.dependencies import get_db
 from app.dependencies.auth import (
     get_current_user,
     require_authenticated_user_page,
 )
 from app.models.user import User
+from app.services.dashboard_service import get_dashboard_summary
 from app.web import templates
 
 
@@ -28,6 +31,7 @@ def root(
 def dashboard(
     request: Request,
     user: User = Depends(require_authenticated_user_page),
+    db: Session = Depends(get_db),
 ) -> HTMLResponse:
     raw_session_token = request.cookies[settings.session_cookie_name]
     return templates.TemplateResponse(
@@ -36,6 +40,8 @@ def dashboard(
         context={
             "user": user,
             "csrf_token": generate_csrf_token(raw_session_token),
+            "summary": get_dashboard_summary(db),
+            "active_page": "dashboard",
         },
     )
 
