@@ -9,7 +9,10 @@
         <h1>{{ camera.code }}</h1>
         <p>{{ camera.name }} &middot; {{ camera.site_code }}</p>
     </div>
-    <span class="status-badge status-badge--{{ camera.connection_state|lower|replace('_', '-') }}">{{ camera.connection_state }}</span>
+    <div class="page-header-actions">
+        <span class="status-badge {% if mqtt_connected %}status-badge--online{% else %}status-badge--offline{% endif %}">MQTT {{ "CONNECTED" if mqtt_connected else "DISCONNECTED" }}</span>
+        <span class="status-badge status-badge--{{ camera.connection_state|lower|replace('_', '-') }}">{{ camera.connection_state }}</span>
+    </div>
 </header>
 
 <div class="camera-detail-grid">
@@ -33,22 +36,23 @@
             <div><dt>MQTT client identity</dt><dd>Not assigned</dd></div>
             <div><dt>Provisioning state</dt><dd><span class="status-badge status-badge--{{ camera.provisioning_state|lower|replace('_', '-') }}">{{ camera.provisioning_state }}</span></dd></div>
             <div><dt>Connection state</dt><dd><span class="status-badge status-badge--{{ camera.connection_state|lower|replace('_', '-') }}">{{ camera.connection_state }}</span></dd></div>
+            <div><dt>MQTT broker</dt><dd><span class="status-badge {% if mqtt_connected %}status-badge--online{% else %}status-badge--offline{% endif %}">{{ "CONNECTED" if mqtt_connected else "DISCONNECTED" }}</span></dd></div>
             <div><dt>Last seen</dt><dd class="data-text">{{ camera.last_seen_display or "Never" }}</dd></div>
-            <div><dt>Last connected</dt><dd>Not available until live MQTT</dd></div>
-            <div><dt>Agent version</dt><dd>Not available until agent reporting</dd></div>
+            <div><dt>Last connected</dt><dd class="data-text">{{ camera.last_connected_display or "Never" }}</dd></div>
+            <div><dt>Agent version</dt><dd class="data-text">{{ camera.agent_version or "Not reported" }}</dd></div>
         </dl>
     </section>
 </div>
 
 <section class="ops-panel camera-topics-panel" aria-labelledby="camera-topics-title">
-    <header class="panel-header"><div><p class="panel-kicker">Future MQTT contract</p><h2 id="camera-topics-title">Topic namespace</h2></div></header>
+    <header class="panel-header"><div><p class="panel-kicker">MQTT contract</p><h2 id="camera-topics-title">Topic namespace</h2></div></header>
     <div class="topic-grid">
         <div><span>Status</span><code>{{ camera.status_topic }}</code></div>
         <div><span>Event</span><code>{{ camera.event_topic }}</code></div>
         <div><span>Command</span><code>{{ camera.command_topic }}</code></div>
         <div><span>Whitelist</span><code>{{ camera.whitelist_topic }}</code></div>
     </div>
-    <p class="panel-note">These topics define identity only. Live MQTT subscription and heartbeat processing are not active in this milestone.</p>
+    <p class="panel-note">ANPR Central subscribes to status heartbeats only. Recognition events, commands, and whitelist synchronization are not active in this milestone.</p>
 </section>
 
 <section class="ops-panel camera-actions-panel" aria-labelledby="camera-actions-title">
@@ -76,6 +80,6 @@
 <div class="state-reference" aria-label="Connection state reference">
     <span><strong>UNPROVISIONED</strong> agent not configured</span>
     <span><strong>CONNECTING</strong> awaiting first confirmed connection</span>
-    <span><strong>ONLINE / OFFLINE</strong> reserved for future heartbeat evidence</span>
+    <span><strong>ONLINE / OFFLINE</strong> derived only from MQTT heartbeat evidence</span>
 </div>
 {% endblock %}

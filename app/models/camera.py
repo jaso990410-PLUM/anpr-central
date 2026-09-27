@@ -78,8 +78,23 @@ class Camera(Base):
         server_default=text("'UNPROVISIONED'"),
     )
 
+    connection_state: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+    )
+
     last_seen_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
+        nullable=True,
+    )
+
+    last_connected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    agent_version: Mapped[str | None] = mapped_column(
+        String(100),
         nullable=True,
     )
 

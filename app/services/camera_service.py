@@ -60,6 +60,8 @@ class CameraDetail:
     provisioning_state: str
     connection_state: str
     last_seen_display: str | None
+    last_connected_display: str | None
+    agent_version: str | None
     status_topic: str
     event_topic: str
     command_topic: str
@@ -130,6 +132,11 @@ class CameraService:
                 camera.last_seen_at,
                 camera.site.timezone,
             ),
+            last_connected_display=_display_time(
+                camera.last_connected_at,
+                camera.site.timezone,
+            ),
+            agent_version=camera.agent_version,
             status_topic=f"{topic_root}/status",
             event_topic=f"{topic_root}/event",
             command_topic=f"{topic_root}/command",
@@ -196,6 +203,7 @@ class CameraService:
                     ip_address=clean_ip,
                     is_enabled=is_enabled,
                     provisioning_state=UNPROVISIONED,
+                    connection_state=None,
                 )
                 self.db.add(camera)
                 self.db.flush()
@@ -208,12 +216,15 @@ class CameraService:
     def set_enabled(self, camera: Camera, *, enabled: bool) -> bool:
         changed = camera.is_enabled != enabled
         camera.is_enabled = enabled
+        if not enabled:
+            camera.connection_state = None
         self.db.flush()
         return changed
 
     def revoke_provisioning(self, camera: Camera) -> bool:
         changed = camera.provisioning_state != CREDENTIALS_REVOKED
         camera.provisioning_state = CREDENTIALS_REVOKED
+        camera.connection_state = None
         self.db.flush()
         return changed
 
@@ -269,6 +280,8 @@ def connection_state(camera: Camera) -> str:
         return DISABLED
     if camera.provisioning_state == CREDENTIALS_REVOKED:
         return CREDENTIALS_REVOKED
+    if camera.connection_state in {ONLINE, OFFLINE}:
+        return camera.connection_state
     if camera.provisioning_state == CONNECTING:
         return CONNECTING
     return UNPROVISIONED

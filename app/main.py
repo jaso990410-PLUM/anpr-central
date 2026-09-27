@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
@@ -15,7 +17,20 @@ from app.dependencies.auth import (
     PageAuthenticationRequired,
     PasswordChangeRequired,
 )
+from app.services.mqtt_service import mqtt_heartbeat_service
 from app.web import STATIC_DIR
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    application.state.mqtt_service = mqtt_heartbeat_service
+    if settings.mqtt_enabled:
+        mqtt_heartbeat_service.start()
+    try:
+        yield
+    finally:
+        if settings.mqtt_enabled:
+            mqtt_heartbeat_service.stop()
 
 
 app = FastAPI(
@@ -24,6 +39,7 @@ app = FastAPI(
     docs_url="/docs" if settings.enable_docs else None,
     redoc_url="/redoc" if settings.enable_docs else None,
     openapi_url="/openapi.json" if settings.enable_docs else None,
+    lifespan=lifespan,
 )
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

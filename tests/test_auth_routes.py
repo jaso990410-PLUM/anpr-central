@@ -27,6 +27,7 @@ from app.services.audit_service import create_audit_log
 from app.services.camera_service import (
     CREDENTIALS_REVOKED,
     DISABLED,
+    ONLINE,
     UNPROVISIONED,
     CameraService,
 )
@@ -1960,6 +1961,42 @@ def test_create_camera_stores_configuration_unprovisioned_state_and_audit(
     assert f"anpr/{camera.id}/whitelist" in detail.text
     assert ">Connect</button>" not in detail.text
     assert ">Reconnect</button>" not in detail.text
+
+
+def test_camera_pages_render_live_heartbeat_state(
+    client: TestClient,
+    db: Session,
+) -> None:
+    create_user(db, permissions=("cameras.view",))
+    site = create_site(db)
+    camera = Camera(
+        site_id=site.id,
+        code="MAIN-ENTRY-01",
+        name="Main Entry",
+        direction="ENTRY",
+        is_enabled=True,
+        provisioning_state="CONNECTING",
+        connection_state=ONLINE,
+        last_seen_at=datetime(2026, 9, 27, 10, 30, tzinfo=timezone.utc),
+        last_connected_at=datetime(2026, 9, 27, 10, 29, tzinfo=timezone.utc),
+        agent_version="1.0.0",
+    )
+    db.add(camera)
+    db.commit()
+    assert login(client).status_code == 303
+
+    camera_list = client.get("/cameras")
+    detail = client.get(f"/cameras/{camera.id}")
+
+    assert camera_list.status_code == 200
+    assert 'status-badge--online">ONLINE' in camera_list.text
+    assert "2026-09-27 18:30:00" in camera_list.text
+    assert "MQTT DISCONNECTED" in camera_list.text
+    assert detail.status_code == 200
+    assert "2026-09-27 18:30:00" in detail.text
+    assert "2026-09-27 18:29:00" in detail.text
+    assert "1.0.0" in detail.text
+    assert "derived only from MQTT heartbeat evidence" in detail.text
 
 
 @pytest.mark.parametrize(

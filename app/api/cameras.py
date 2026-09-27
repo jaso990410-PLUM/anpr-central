@@ -15,6 +15,7 @@ from app.models.user import User
 from app.services.audit_service import create_audit_log
 from app.services.camera_service import CameraService, CameraValidationError
 from app.services.dashboard_service import get_dashboard_summary
+from app.services.mqtt_service import mqtt_heartbeat_service
 from app.services.shell_service import build_navigation, role_label
 from app.web import templates
 
@@ -36,6 +37,7 @@ def _shell_context(
         "active_page": "cameras",
         "navigation": build_navigation(user),
         "user_role_label": role_label(user),
+        "mqtt_connected": mqtt_heartbeat_service.is_connected,
     }
 
 

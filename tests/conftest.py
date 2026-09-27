@@ -11,6 +11,7 @@ os.environ.setdefault(
     "ANPR_SECRET_KEY",
     "test-only-secret-key-with-at-least-32-characters",
 )
+os.environ.setdefault("ANPR_MQTT_ENABLED", "false")
 
 from app.db.base import Base  # noqa: E402
 import app.models  # noqa: E402, F401

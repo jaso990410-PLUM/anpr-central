@@ -1153,6 +1153,13 @@ a.nav-item:hover {
     color: var(--text-secondary);
 }
 
+.page-header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.65rem;
+}
+
 .metric-grid {
     display: grid;
     margin-bottom: 1.25rem;
@@ -2127,6 +2134,12 @@ a.nav-item:hover {
         flex-direction: column;
         gap: 0.85rem;
         margin-bottom: 1.4rem;
+    }
+
+    .page-header-actions {
+        width: 100%;
+        justify-content: flex-start;
+        flex-wrap: wrap;
     }
 
     .metric-grid {

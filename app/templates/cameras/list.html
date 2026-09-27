@@ -9,9 +9,10 @@
         <h1>Cameras</h1>
         <p>Camera identities, configuration, and provisioning readiness.</p>
     </div>
-    {% if can_manage_cameras %}
-    <a class="button-primary button-primary--compact" href="/cameras/new">Add camera</a>
-    {% endif %}
+    <div class="page-header-actions">
+        <span class="status-badge {% if mqtt_connected %}status-badge--online{% else %}status-badge--offline{% endif %}">MQTT {{ "CONNECTED" if mqtt_connected else "DISCONNECTED" }}</span>
+        {% if can_manage_cameras %}<a class="button-primary button-primary--compact" href="/cameras/new">Add camera</a>{% endif %}
+    </div>
 </header>
 
 <section class="ops-panel" aria-labelledby="camera-directory-title">

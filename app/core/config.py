@@ -14,6 +14,8 @@ class Settings(BaseSettings):
 
     mqtt_host: str = "127.0.0.1"
     mqtt_port: int = 1883
+    mqtt_enabled: bool = True
+    mqtt_heartbeat_timeout_seconds: int = Field(default=45, gt=0)
 
     default_site_code: str = "MAIN"
 
