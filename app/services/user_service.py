@@ -10,12 +10,15 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
 from app.core.security import hash_password
+from app.models.associations import user_roles
 from app.models.role import Role
 from app.models.site import Site
 from app.models.user import User
+from app.services.session_service import revoke_all_user_sessions
 
 
 _EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_ADMINISTRATOR_ROLE_CODE = "administrator"
 
 
 class UserValidationError(ValueError):
@@ -33,6 +36,15 @@ class UserListItem:
     status_label: str
     last_login_display: str | None
     created_display: str
+
+
+@dataclass(frozen=True)
+class UserUpdateResult:
+    user: User
+    updated_fields: tuple[str, ...]
+    activation_action: str | None
+    roles_changed: bool
+    sessions_revoked: int
 
 
 class UserService:
@@ -70,15 +82,28 @@ class UserService:
             self.db.scalars(select(Role).order_by(Role.name, Role.code)).all()
         )
 
+    def get_user(self, user_id: UUID) -> User | None:
+        return self.db.scalar(
+            select(User)
+            .options(selectinload(User.roles))
+            .where(User.id == user_id)
+        )
+
     def username_exists(self, username: str) -> bool:
         return self.db.scalar(
             select(User.id).where(func.lower(User.username) == username.lower())
         ) is not None
 
-    def email_exists(self, email: str) -> bool:
-        return self.db.scalar(
-            select(User.id).where(func.lower(User.email) == email.lower())
-        ) is not None
+    def email_exists(
+        self,
+        email: str,
+        *,
+        exclude_user_id: UUID | None = None,
+    ) -> bool:
+        query = select(User.id).where(func.lower(User.email) == email.lower())
+        if exclude_user_id is not None:
+            query = query.where(User.id != exclude_user_id)
+        return self.db.scalar(query) is not None
 
     def create_user(
         self,
@@ -119,19 +144,7 @@ class UserService:
         if clean_email is not None and self.email_exists(clean_email):
             raise UserValidationError("That email address is already in use.")
 
-        parsed_role_ids: set[UUID] = set()
-        try:
-            parsed_role_ids = {UUID(value) for value in role_ids}
-        except (ValueError, TypeError, AttributeError) as error:
-            raise UserValidationError("One or more selected roles are invalid.") from error
-        if not parsed_role_ids:
-            raise UserValidationError("Select at least one role.")
-
-        roles = self.db.scalars(
-            select(Role).where(Role.id.in_(parsed_role_ids)).order_by(Role.name)
-        ).all()
-        if {role.id for role in roles} != parsed_role_ids:
-            raise UserValidationError("One or more selected roles are invalid.")
+        roles = self._resolve_roles(role_ids)
 
         try:
             with self.db.begin_nested():
@@ -153,6 +166,126 @@ class UserService:
                 "The username or email address is already in use."
             ) from error
         return user
+
+    def update_user(
+        self,
+        target: User,
+        *,
+        actor_user_id: UUID,
+        full_name: str,
+        email: str | None,
+        role_ids: list[str],
+        is_active: bool,
+    ) -> UserUpdateResult:
+        clean_full_name = full_name.strip()
+        clean_email = (email or "").strip() or None
+        self._validate_edit_profile(clean_full_name, clean_email, target.id)
+        roles = self._resolve_roles(role_ids)
+
+        previous_role_ids = {role.id for role in target.roles}
+        next_role_ids = {role.id for role in roles}
+        roles_changed = previous_role_ids != next_role_ids
+        activation_changed = target.is_active != is_active
+
+        if target.id == actor_user_id and not is_active:
+            raise UserValidationError("You cannot disable your own account.")
+
+        administrator_role = self.db.scalar(
+            select(Role)
+            .where(Role.code == _ADMINISTRATOR_ROLE_CODE)
+            .with_for_update()
+        )
+        if administrator_role is not None:
+            was_active_administrator = (
+                target.is_active and administrator_role.id in previous_role_ids
+            )
+            will_be_active_administrator = (
+                is_active and administrator_role.id in next_role_ids
+            )
+            if was_active_administrator and not will_be_active_administrator:
+                active_administrator_count = self.db.scalar(
+                    select(func.count(User.id))
+                    .select_from(User)
+                    .join(user_roles, user_roles.c.user_id == User.id)
+                    .where(
+                        user_roles.c.role_id == administrator_role.id,
+                        User.is_active.is_(True),
+                    )
+                ) or 0
+                if active_administrator_count <= 1:
+                    raise UserValidationError(
+                        "The last active administrator cannot be disabled or "
+                        "have the administrator role removed."
+                    )
+
+        updated_fields: list[str] = []
+        if target.full_name != clean_full_name:
+            updated_fields.append("full_name")
+        if target.email != clean_email:
+            updated_fields.append("email")
+        if roles_changed:
+            updated_fields.append("roles")
+
+        try:
+            with self.db.begin_nested():
+                target.full_name = clean_full_name
+                target.email = clean_email
+                target.roles = list(roles)
+                target.is_active = is_active
+                self.db.flush()
+        except IntegrityError as error:
+            raise UserValidationError(
+                "That email address is already in use."
+            ) from error
+
+        sessions_revoked = 0
+        if roles_changed or (activation_changed and not is_active):
+            sessions_revoked = revoke_all_user_sessions(self.db, target.id)
+
+        activation_action = None
+        if activation_changed:
+            activation_action = "user.enable" if is_active else "user.disable"
+
+        return UserUpdateResult(
+            user=target,
+            updated_fields=tuple(updated_fields),
+            activation_action=activation_action,
+            roles_changed=roles_changed,
+            sessions_revoked=sessions_revoked,
+        )
+
+    def _validate_edit_profile(
+        self,
+        full_name: str,
+        email: str | None,
+        target_user_id: UUID,
+    ) -> None:
+        if not full_name:
+            raise UserValidationError("Full name is required.")
+        if len(full_name) > 150:
+            raise UserValidationError("Full name must contain at most 150 characters.")
+        if email is not None:
+            if len(email) > 255:
+                raise UserValidationError("Email must contain at most 255 characters.")
+            if not _EMAIL_PATTERN.fullmatch(email):
+                raise UserValidationError("Enter a valid email address.")
+            if self.email_exists(email, exclude_user_id=target_user_id):
+                raise UserValidationError("That email address is already in use.")
+
+    def _resolve_roles(self, role_ids: list[str]) -> list[Role]:
+        try:
+            parsed_role_ids = {UUID(value) for value in role_ids}
+        except (ValueError, TypeError, AttributeError) as error:
+            raise UserValidationError("One or more selected roles are invalid.") from error
+        if not parsed_role_ids:
+            raise UserValidationError("Select at least one role.")
+
+        roles = self.db.scalars(
+            select(Role).where(Role.id.in_(parsed_role_ids)).order_by(Role.name)
+        ).all()
+        if {role.id for role in roles} != parsed_role_ids:
+            raise UserValidationError("One or more selected roles are invalid.")
+        return list(roles)
 
     def _display_timezone(self) -> str:
         timezone_name = self.db.scalar(

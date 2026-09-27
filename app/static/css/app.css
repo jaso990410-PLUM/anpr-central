@@ -1612,6 +1612,23 @@ a.nav-item:hover {
     font-size: 0.68rem;
 }
 
+.staff-user-form .field-group input[readonly] {
+    color: var(--text-secondary);
+    background: rgba(36, 50, 71, 0.22);
+    cursor: not-allowed;
+}
+
+.table-actions {
+    width: 1%;
+    white-space: nowrap;
+}
+
+.form-note {
+    margin: -0.45rem 0 0;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+
 .role-selector {
     margin: 0;
     padding: 1.1rem;

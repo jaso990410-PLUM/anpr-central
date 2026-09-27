@@ -1,0 +1,86 @@
+{% extends "base_app.html" %}
+
+{% block title %}Edit {{ target_user.username }} &middot; ANPR Central{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <p class="eyebrow">Access management</p>
+        <h1>Edit staff user</h1>
+        <p>Update profile details, operational roles, and account access.</p>
+    </div>
+    <a class="button-secondary" href="/users">Back to users</a>
+</header>
+
+<section class="ops-panel user-form-panel" aria-labelledby="edit-user-title">
+    <header class="panel-header">
+        <div>
+            <p class="panel-kicker">Internal account</p>
+            <h2 id="edit-user-title">{{ target_user.username }}</h2>
+        </div>
+        <span class="status-badge {% if values.is_active %}status-badge--active{% else %}status-badge--disabled{% endif %}">
+            {{ "Active" if values.is_active else "Inactive" }}
+        </span>
+    </header>
+
+    {% if error %}
+    <div class="alert alert--critical" role="alert">
+        <span class="alert-icon" aria-hidden="true">!</span>
+        <span>{{ error }}</span>
+    </div>
+    {% endif %}
+
+    <form class="staff-user-form" method="post" action="/users/{{ target_user.id }}/edit">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+        <div class="form-grid">
+            <div class="field-group">
+                <label for="username">Username</label>
+                <input id="username" value="{{ target_user.username }}" readonly aria-readonly="true">
+                <small>Username cannot be changed here.</small>
+            </div>
+            <div class="field-group">
+                <label for="full-name">Full name</label>
+                <input id="full-name" name="full_name" maxlength="150" value="{{ values.full_name or '' }}" autocomplete="name" required>
+            </div>
+            <div class="field-group form-grid__wide">
+                <label for="email">Email <span class="muted-text">(optional)</span></label>
+                <input id="email" name="email" type="email" maxlength="255" value="{{ values.email or '' }}" autocomplete="email">
+            </div>
+        </div>
+
+        <fieldset class="role-selector">
+            <legend>Assigned roles</legend>
+            <p>Changing roles revokes this user&rsquo;s active sessions so new permissions take effect immediately.</p>
+            <div class="role-selector__grid">
+                {% for role in roles %}
+                <label class="role-option">
+                    <input type="checkbox" name="role_ids" value="{{ role.id }}" {% if role.id|string in values.role_ids %}checked{% endif %}>
+                    <span><strong>{{ role.name }}</strong><small class="data-text">{{ role.code }}</small></span>
+                </label>
+                {% else %}
+                <p class="muted-text">No roles are configured.</p>
+                {% endfor %}
+            </div>
+        </fieldset>
+
+        <label class="account-state-option">
+            <input type="checkbox" name="is_active" value="true" {% if values.is_active %}checked{% endif %}>
+            <span>
+                <strong>Account active</strong>
+                <small>Disabling an account revokes all of its active sessions.</small>
+            </span>
+        </label>
+
+        {% if target_user.id == user.id %}
+        <p class="form-note">You are editing your own account. ANPR Central will not allow you to disable it.</p>
+        {% endif %}
+        <p class="form-note">Password changes and account unlocking are managed separately and are not available here.</p>
+
+        <div class="form-actions">
+            <button class="button-primary button-primary--compact" type="submit">Save changes</button>
+            <a class="button-quiet" href="/users">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

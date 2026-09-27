@@ -642,6 +642,7 @@ def test_user_list_renders_real_database_users_and_manage_action(
     assert "Administrator" in response.text
     assert "Add user" in response.text
     assert 'href="/users/new"' in response.text
+    assert f'href="/users/{actor.id}/edit"' in response.text
     assert 'data-nav-key="users"' in response.text
 
 
@@ -993,3 +994,315 @@ def test_self_registration_routes_do_not_exist(
     login_page = client.get("/login")
     assert 'href="/register"' not in login_page.text
     assert 'href="/signup"' not in login_page.text
+
+
+def create_staff_user(
+    db: Session,
+    role: Role,
+    *,
+    username: str = "operator-one",
+    email: str | None = "operator@example.test",
+    is_active: bool = True,
+) -> User:
+    user = User(
+        username=username,
+        full_name="Original Operator",
+        email=email,
+        password_hash=hash_password("operator secure passphrase"),
+        is_active=is_active,
+        must_change_password=False,
+        failed_login_count=0,
+        roles=[role],
+    )
+    db.add(user)
+    db.commit()
+    return user
+
+
+def submit_user_edit(
+    client: TestClient,
+    target: User,
+    **overrides: object,
+):
+    page = client.get(f"/users/{target.id}/edit")
+    assert page.status_code == 200
+    data: dict[str, object] = {
+        "full_name": target.full_name,
+        "email": target.email or "",
+        "role_ids": [str(role.id) for role in target.roles],
+        "is_active": "true" if target.is_active else "",
+        "csrf_token": extract_csrf_token(page.text),
+    }
+    data.update(overrides)
+    return client.post(f"/users/{target.id}/edit", data=data)
+
+
+def test_edit_user_requires_users_manage_permission(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("users.view",))
+    assert login(client).status_code == 303
+
+    get_response = client.get(f"/users/{actor.id}/edit")
+    csrf_token = extract_csrf_token(client.get("/dashboard").text)
+    post_response = client.post(
+        f"/users/{actor.id}/edit",
+        data={
+            "full_name": actor.full_name,
+            "role_ids": str(actor.roles[0].id),
+            "is_active": "true",
+            "csrf_token": csrf_token,
+        },
+    )
+
+    assert get_response.status_code == 403
+    assert post_response.status_code == 403
+
+
+def test_edit_user_page_uses_database_roles_and_read_only_identity(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("users.manage",))
+    target_role = create_role(db, "operator", "Gate Operator")
+    target = create_staff_user(db, target_role)
+    assert login(client).status_code == 303
+
+    response = client.get(f"/users/{target.id}/edit")
+
+    assert response.status_code == 200
+    assert "Gate Operator" in response.text
+    assert str(target_role.id) in response.text
+    assert f'value="{target.username}" readonly' in response.text
+    assert 'name="username"' not in response.text
+    assert 'type="password"' not in response.text
+
+
+def test_edit_user_updates_profile_roles_and_audits_safely(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("users.manage",))
+    operator_role = create_role(db, "operator", "Operator")
+    security_role = create_role(db, "security", "Security")
+    target = create_staff_user(db, operator_role)
+    original_username = target.username
+    original_password_hash = target.password_hash
+    assert login(client).status_code == 303
+
+    response = submit_user_edit(
+        client,
+        target,
+        full_name="Updated Operator",
+        email="updated@example.test",
+        role_ids=[str(operator_role.id), str(security_role.id)],
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/users"
+    db.expire_all()
+    updated = db.get(User, target.id)
+    assert updated is not None
+    assert updated.username == original_username
+    assert updated.password_hash == original_password_hash
+    assert updated.full_name == "Updated Operator"
+    assert updated.email == "updated@example.test"
+    assert {role.code for role in updated.roles} == {"operator", "security"}
+
+    audit = db.scalar(select(AuditLog).where(AuditLog.action == "user.update"))
+    assert audit is not None
+    assert audit.actor_user_id == actor.id
+    assert audit.entity_id == str(target.id)
+    assert audit.details["updated_fields"] == ["full_name", "email", "roles"]
+    audit_text = str(audit.details).lower()
+    assert "password" not in audit_text
+    assert "token" not in audit_text
+    assert "csrf" not in audit_text
+    assert original_password_hash not in audit_text
+
+
+def test_edit_user_rejects_duplicate_email(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("users.manage",))
+    actor.email = "admin@example.test"
+    role = create_role(db, "operator", "Operator")
+    target = create_staff_user(db, role)
+    db.commit()
+    assert login(client).status_code == 303
+
+    response = submit_user_edit(
+        client,
+        target,
+        email="ADMIN@EXAMPLE.TEST",
+    )
+
+    assert response.status_code == 400
+    assert "That email address is already in use." in response.text
+    db.refresh(target)
+    assert target.email == "operator@example.test"
+
+
+def test_edit_user_rejects_invalid_role_id(
+    client: TestClient,
+    db: Session,
+) -> None:
+    create_user(db, permissions=("users.manage",))
+    role = create_role(db, "operator", "Operator")
+    target = create_staff_user(db, role)
+    assert login(client).status_code == 303
+
+    response = submit_user_edit(
+        client,
+        target,
+        role_ids=["not-a-role-id"],
+    )
+
+    assert response.status_code == 400
+    assert "One or more selected roles are invalid." in response.text
+    db.refresh(target)
+    assert {assigned.code for assigned in target.roles} == {"operator"}
+
+
+def test_disabling_and_reenabling_user_revokes_sessions_and_audits(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("users.manage",))
+    role = create_role(db, "operator", "Operator")
+    target = create_staff_user(db, role)
+    target_raw_token, _ = create_session(db, target)
+    db.commit()
+    assert login(client).status_code == 303
+
+    disable_response = submit_user_edit(client, target, is_active="")
+
+    assert disable_response.status_code == 303
+    db.expire_all()
+    disabled = db.get(User, target.id)
+    assert disabled is not None
+    assert not disabled.is_active
+    assert find_valid_session(db, target_raw_token, touch=False) is None
+
+    enable_response = submit_user_edit(client, disabled, is_active="true")
+
+    assert enable_response.status_code == 303
+    db.expire_all()
+    enabled = db.get(User, target.id)
+    assert enabled is not None
+    assert enabled.is_active
+    audits = db.scalars(
+        select(AuditLog)
+        .where(AuditLog.action.in_(("user.disable", "user.enable")))
+        .order_by(AuditLog.created_at, AuditLog.action)
+    ).all()
+    assert {audit.action for audit in audits} == {"user.disable", "user.enable"}
+    disable_audit = next(audit for audit in audits if audit.action == "user.disable")
+    assert disable_audit.details["sessions_revoked"] == 1
+
+
+def test_role_change_revokes_all_target_sessions(
+    client: TestClient,
+    db: Session,
+) -> None:
+    create_user(db, permissions=("users.manage",))
+    operator_role = create_role(db, "operator", "Operator")
+    security_role = create_role(db, "security", "Security")
+    target = create_staff_user(db, operator_role)
+    first_token, _ = create_session(db, target)
+    second_token, _ = create_session(db, target)
+    db.commit()
+    assert login(client).status_code == 303
+
+    response = submit_user_edit(
+        client,
+        target,
+        role_ids=[str(security_role.id)],
+    )
+
+    assert response.status_code == 303
+    assert find_valid_session(db, first_token, touch=False) is None
+    assert find_valid_session(db, second_token, touch=False) is None
+    audit = db.scalar(select(AuditLog).where(AuditLog.action == "user.update"))
+    assert audit is not None
+    assert audit.details["sessions_revoked"] == 2
+
+
+def test_current_user_cannot_disable_themselves(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("users.manage",))
+    assert login(client).status_code == 303
+
+    response = submit_user_edit(client, actor, is_active="")
+
+    assert response.status_code == 400
+    assert "You cannot disable your own account." in response.text
+    db.refresh(actor)
+    assert actor.is_active
+    assert client.get("/dashboard").status_code == 200
+
+
+@pytest.mark.parametrize("change", ["disable", "remove-role"])
+def test_last_active_administrator_is_protected(
+    client: TestClient,
+    db: Session,
+    change: str,
+) -> None:
+    actor = create_user(db, permissions=("users.manage",))
+    actor.roles[0].code = "access-manager"
+    actor.roles[0].name = "Access Manager"
+    administrator_role = create_role(db, "administrator", "Administrator")
+    operator_role = create_role(db, "operator", "Operator")
+    target = create_staff_user(
+        db,
+        administrator_role,
+        username="last-admin",
+        email="last-admin@example.test",
+    )
+    db.commit()
+    assert login(client).status_code == 303
+
+    overrides: dict[str, object]
+    if change == "disable":
+        overrides = {"is_active": ""}
+    else:
+        overrides = {"role_ids": [str(operator_role.id)]}
+    response = submit_user_edit(client, target, **overrides)
+
+    assert response.status_code == 400
+    assert "last active administrator" in response.text
+    db.expire_all()
+    unchanged = db.get(User, target.id)
+    assert unchanged is not None
+    assert unchanged.is_active
+    assert {role.code for role in unchanged.roles} == {"administrator"}
+
+
+@pytest.mark.parametrize("csrf_token", [None, "invalid"])
+def test_edit_user_rejects_missing_or_invalid_csrf(
+    client: TestClient,
+    db: Session,
+    csrf_token: str | None,
+) -> None:
+    create_user(db, permissions=("users.manage",))
+    role = create_role(db, "operator", "Operator")
+    target = create_staff_user(db, role)
+    assert login(client).status_code == 303
+    data = {
+        "full_name": "Changed Without CSRF",
+        "email": target.email or "",
+        "role_ids": str(role.id),
+        "is_active": "true",
+    }
+    if csrf_token is not None:
+        data["csrf_token"] = csrf_token
+
+    response = client.post(f"/users/{target.id}/edit", data=data)
+
+    assert response.status_code == 403
+    db.refresh(target)
+    assert target.full_name == "Original Operator"
