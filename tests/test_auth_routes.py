@@ -22,6 +22,7 @@ from app.models.role import Role
 from app.models.site import Site
 from app.models.user import User
 from app.models.user_session import UserSession
+from app.services.audit_service import create_audit_log
 from app.services.session_service import create_session, find_valid_session
 from app.services.user_service import UserService
 
@@ -1588,3 +1589,188 @@ def test_public_password_reset_routes_do_not_exist(
     assert client.get(path).status_code == 404
     login_page = client.get("/login")
     assert f'href="{path}"' not in login_page.text
+
+
+def test_audit_page_redirects_anonymous_user(client: TestClient) -> None:
+    response = client.get("/audit")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login?next=%2Faudit"
+
+
+def test_audit_page_requires_audit_view_permission(
+    client: TestClient,
+    db: Session,
+) -> None:
+    create_user(db, permissions=("users.view",))
+    assert login(client).status_code == 303
+
+    response = client.get("/audit")
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Permission denied"}
+
+
+def test_audit_page_renders_real_records(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("audit.view",))
+    create_audit_log(
+        db,
+        action="camera.configuration_test",
+        actor_user_id=actor.id,
+        entity_type="camera",
+        entity_id="MAIN-ENTRY-01",
+        details={"result": "audit-record-visible", "changed": 2},
+        ip_address="192.0.2.44",
+    )
+    db.commit()
+    assert login(client).status_code == 303
+
+    response = client.get("/audit")
+
+    assert response.status_code == 200
+    assert "Audit events" in response.text
+    assert "camera.configuration_test" in response.text
+    assert "admin · System Administrator" in response.text
+    assert "MAIN-ENTRY-01" in response.text
+    assert "192.0.2.44" in response.text
+    assert "result=audit-record-visible" in response.text
+    assert "changed=2" in response.text
+    assert 'data-nav-key="audit"' in response.text
+    assert 'href="/audit"' in response.text
+
+
+def test_audit_filters_action_actor_and_date_range(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("audit.view",))
+    role = create_role(db, "operator", "Operator")
+    other_actor = create_staff_user(
+        db,
+        role,
+        username="audit-operator",
+        email="audit-operator@example.test",
+    )
+    db.add_all(
+        [
+            AuditLog(
+                actor_user_id=actor.id,
+                action="camera.enable",
+                entity_type="camera",
+                entity_id="CAM-A",
+                details={"marker": "ACTION-FILTER-MARKER"},
+                created_at=datetime(2026, 1, 10, 12, tzinfo=timezone.utc),
+            ),
+            AuditLog(
+                actor_user_id=other_actor.id,
+                action="user.update",
+                entity_type="user",
+                entity_id=str(other_actor.id),
+                details={"marker": "ACTOR-DATE-FILTER-MARKER"},
+                created_at=datetime(2026, 2, 10, 12, tzinfo=timezone.utc),
+            ),
+            AuditLog(
+                actor_user_id=other_actor.id,
+                action="camera.disable",
+                entity_type="camera",
+                entity_id="CAM-C",
+                details={"marker": "ACTOR-ONLY-MARKER"},
+                created_at=datetime(2026, 3, 10, 12, tzinfo=timezone.utc),
+            ),
+        ]
+    )
+    db.commit()
+    assert login(client).status_code == 303
+
+    action_response = client.get("/audit", params={"action": "camera.enable"})
+    actor_response = client.get("/audit", params={"actor": str(other_actor.id)})
+    actor_name_response = client.get("/audit", params={"actor": "AUDIT-OPERATOR"})
+    date_response = client.get(
+        "/audit",
+        params={"date_from": "2026-02-01", "date_to": "2026-02-28"},
+    )
+
+    assert action_response.status_code == 200
+    assert "ACTION-FILTER-MARKER" in action_response.text
+    assert "ACTOR-DATE-FILTER-MARKER" not in action_response.text
+    assert "ACTOR-ONLY-MARKER" not in action_response.text
+
+    for response in (actor_response, actor_name_response):
+        assert response.status_code == 200
+        assert "ACTOR-DATE-FILTER-MARKER" in response.text
+        assert "ACTOR-ONLY-MARKER" in response.text
+        assert "ACTION-FILTER-MARKER" not in response.text
+
+    assert date_response.status_code == 200
+    assert "ACTOR-DATE-FILTER-MARKER" in date_response.text
+    assert "ACTION-FILTER-MARKER" not in date_response.text
+    assert "ACTOR-ONLY-MARKER" not in date_response.text
+    assert "2026-02-10 20:00:00" in date_response.text
+
+
+def test_audit_viewer_removes_sensitive_details_at_read_time(
+    client: TestClient,
+    db: Session,
+) -> None:
+    actor = create_user(db, permissions=("audit.view",))
+    db.add(
+        AuditLog(
+            actor_user_id=actor.id,
+            action="legacy.unsafe_record",
+            details={
+                "safe_note": "VISIBLE-SAFE-MARKER",
+                "password": "LEAKED-PASSWORD-VALUE",
+                "password_hash": "LEAKED-HASH-VALUE",
+                "session_token": "LEAKED-SESSION-VALUE",
+                "csrf_token": "LEAKED-CSRF-VALUE",
+                "secret_key": "LEAKED-SECRET-VALUE",
+                "nested": {
+                    "authorization": "LEAKED-AUTH-VALUE",
+                    "safe": "VISIBLE-NESTED-MARKER",
+                },
+            },
+        )
+    )
+    db.commit()
+    assert login(client).status_code == 303
+
+    response = client.get("/audit")
+
+    assert response.status_code == 200
+    assert "VISIBLE-SAFE-MARKER" in response.text
+    assert "VISIBLE-NESTED-MARKER" in response.text
+    for sensitive_value in (
+        "LEAKED-PASSWORD-VALUE",
+        "LEAKED-HASH-VALUE",
+        "LEAKED-SESSION-VALUE",
+        "LEAKED-CSRF-VALUE",
+        "LEAKED-SECRET-VALUE",
+        "LEAKED-AUTH-VALUE",
+    ):
+        assert sensitive_value not in response.text
+
+
+@pytest.mark.parametrize(
+    ("permissions", "audit_visible"),
+    [
+        (("audit.view",), True),
+        (("users.view",), False),
+    ],
+)
+def test_sidebar_visibility_respects_audit_view_permission(
+    client: TestClient,
+    db: Session,
+    permissions: tuple[str, ...],
+    audit_visible: bool,
+) -> None:
+    create_user(db, permissions=permissions)
+    assert login(client).status_code == 303
+
+    dashboard = client.get("/dashboard")
+
+    assert dashboard.status_code == 200
+    assert ('data-nav-key="audit"' in dashboard.text) is audit_visible
+    assert ('href="/audit"' in dashboard.text) is audit_visible

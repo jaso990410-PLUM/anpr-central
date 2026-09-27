@@ -1741,6 +1741,69 @@ a.nav-item:hover {
     justify-self: start;
 }
 
+.audit-directory__header {
+    align-items: flex-end;
+}
+
+.audit-filters {
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+    gap: 0.55rem;
+}
+
+.filter-field {
+    display: grid;
+    gap: 0.3rem;
+}
+
+.filter-field label {
+    color: var(--text-muted);
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+}
+
+.filter-field select,
+.filter-field input {
+    min-height: 2.55rem;
+    padding: 0 0.7rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    background: #0c1420;
+    color-scheme: dark;
+}
+
+.filter-field select:focus,
+.filter-field input:focus {
+    border-color: var(--primary);
+    outline: 0;
+    box-shadow: 0 0 0 3px rgba(47, 168, 255, 0.12);
+}
+
+.audit-table {
+    min-width: 78rem;
+}
+
+.audit-action {
+    display: inline-flex;
+    padding: 0.22rem 0.42rem;
+    border: 1px solid rgba(47, 168, 255, 0.2);
+    border-radius: 0.25rem;
+    color: #a9dbff;
+    background: rgba(47, 168, 255, 0.06);
+    white-space: nowrap;
+}
+
+.audit-details {
+    max-width: 24rem;
+    color: var(--text-muted);
+    font-size: 0.66rem;
+    line-height: 1.5;
+}
+
 /* Responsive behavior */
 
 @media (max-width: 75rem) {
@@ -1900,6 +1963,17 @@ a.nav-item:hover {
 
     .directory-search input {
         width: 100%;
+    }
+
+    .audit-filters {
+        width: 100%;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+
+    .audit-filters .filter-field {
+        min-width: min(100%, 12rem);
+        flex: 1 1 10rem;
     }
 
     .form-grid,

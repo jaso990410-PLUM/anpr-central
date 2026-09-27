@@ -26,7 +26,7 @@ _PERMISSION_NAVIGATION = (
     ("Management", "cameras", "Cameras", "camera", "cameras.view", None),
     ("Management", "users", "Users", "users", "users.view", "/users"),
     ("Monitoring", "recognition", "Recognition History", "recognition", "events.view", None),
-    ("Monitoring", "audit", "Audit Log", "audit", "audit.view", None),
+    ("Monitoring", "audit", "Audit Log", "audit", "audit.view", "/audit"),
 )
 
 

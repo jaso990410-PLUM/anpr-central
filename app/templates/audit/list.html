@@ -1,0 +1,94 @@
+{% extends "base_app.html" %}
+
+{% block title %}Audit Log &middot; ANPR Central{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <p class="eyebrow">System accountability</p>
+        <h1>Audit log</h1>
+        <p>Read-only operational and security activity recorded by ANPR Central.</p>
+    </div>
+    <span class="status-badge status-badge--neutral">Read only</span>
+</header>
+
+<section class="ops-panel audit-directory" aria-labelledby="audit-events-title">
+    <header class="panel-header audit-directory__header">
+        <div>
+            <p class="panel-kicker">Recorded activity</p>
+            <h2 id="audit-events-title">Audit events</h2>
+        </div>
+        <form class="audit-filters" method="get" action="/audit" aria-label="Audit log filters">
+            <div class="filter-field">
+                <label for="audit-action">Action</label>
+                <select id="audit-action" name="action">
+                    <option value="">All actions</option>
+                    {% for available_action in actions %}
+                    <option value="{{ available_action }}" {% if filters.action == available_action %}selected{% endif %}>{{ available_action }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="filter-field">
+                <label for="audit-actor">Actor</label>
+                <select id="audit-actor" name="actor">
+                    <option value="">All actors</option>
+                    {% for available_actor in actors %}
+                    <option value="{{ available_actor.id }}" {% if filters.actor == available_actor.id|string %}selected{% endif %}>{{ available_actor.username }} &middot; {{ available_actor.full_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="filter-field">
+                <label for="audit-date-from">From</label>
+                <input id="audit-date-from" name="date_from" type="date" value="{{ filters.date_from }}">
+            </div>
+            <div class="filter-field">
+                <label for="audit-date-to">To</label>
+                <input id="audit-date-to" name="date_to" type="date" value="{{ filters.date_to }}">
+            </div>
+            <button class="button-secondary" type="submit">Apply</button>
+            {% if filters.action or filters.actor or filters.date_from or filters.date_to %}
+            <a class="button-quiet" href="/audit">Clear</a>
+            {% endif %}
+        </form>
+    </header>
+
+    <div class="table-wrap">
+        <table class="data-table audit-table">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Actor</th>
+                    <th>Action</th>
+                    <th>Entity type</th>
+                    <th>Entity ID</th>
+                    <th>IP address</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in entries %}
+                <tr>
+                    <td class="data-text">{{ entry.timestamp_display }}</td>
+                    <td><strong class="table-primary">{{ entry.actor_display }}</strong></td>
+                    <td><span class="audit-action">{{ entry.action }}</span></td>
+                    <td>{{ entry.entity_type or "—" }}</td>
+                    <td class="data-text">{{ entry.entity_id or "—" }}</td>
+                    <td class="data-text">{{ entry.ip_address or "—" }}</td>
+                    <td class="audit-details">{{ entry.details_display or "—" }}</td>
+                </tr>
+                {% else %}
+                <tr class="empty-row">
+                    <td colspan="7">
+                        <div class="empty-state">
+                            <span class="empty-state__mark" aria-hidden="true"></span>
+                            <strong>No audit events found</strong>
+                            <span>Adjust the filters or wait for new system activity.</span>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
