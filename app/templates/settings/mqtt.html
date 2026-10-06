@@ -1,0 +1,91 @@
+{% extends "base_app.html" %}
+
+{% block title %}MQTT Broker &middot; ANPR Central{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <p class="eyebrow">System transport</p>
+        <h1>MQTT Broker</h1>
+        <p>Configure ANPR Central&rsquo;s connection to Mosquitto.</p>
+    </div>
+    <span class="status-badge {% if runtime.is_connected %}status-badge--online{% else %}status-badge--offline{% endif %}">MQTT {{ "CONNECTED" if runtime.is_connected else "DISCONNECTED" }}</span>
+</header>
+
+{% if saved %}
+<div class="alert alert--success" role="status"><span>Broker configuration saved and the central client was reconfigured.</span></div>
+{% endif %}
+{% if error %}
+<div class="alert alert--critical" role="alert"><span>{{ error }}</span></div>
+{% endif %}
+{% if test_result %}
+<div class="alert {% if test_result.success %}alert--success{% else %}alert--critical{% endif %}" role="status">
+    <span>{{ test_result.message }}. This test covers ANPR Central to Mosquitto only.</span>
+</div>
+{% endif %}
+
+<div class="mqtt-settings-grid">
+    <section class="ops-panel user-form-panel" aria-labelledby="broker-config-title">
+        <header class="panel-header">
+            <div><p class="panel-kicker">Central client</p><h2 id="broker-config-title">Broker connection</h2></div>
+            <span class="status-badge status-badge--neutral">{{ values.source|upper }}</span>
+        </header>
+        <form class="staff-user-form" method="post" action="/settings/mqtt" autocomplete="off">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label class="account-state-option">
+                <input type="checkbox" name="mqtt_enabled" value="true" {% if values.is_enabled %}checked{% endif %}>
+                <span><strong>Enable central MQTT client</strong><small>Disabling stops ANPR Central&rsquo;s broker connection without changing camera records.</small></span>
+            </label>
+            <div class="form-grid">
+                <div class="field-group">
+                    <label for="mqtt-host">Broker host or IP</label>
+                    <input id="mqtt-host" name="host" maxlength="255" value="{{ values.host }}" placeholder="192.168.100.11" required>
+                </div>
+                <div class="field-group">
+                    <label for="mqtt-port">Port</label>
+                    <input id="mqtt-port" name="port" type="number" min="1" max="65535" value="{{ values.port }}" required>
+                </div>
+                <div class="field-group">
+                    <label for="mqtt-username">Username <span class="muted-text">(optional)</span></label>
+                    <input id="mqtt-username" name="username" maxlength="255" value="{{ values.username }}" autocomplete="username">
+                </div>
+                <div class="field-group">
+                    <label for="mqtt-password">Password</label>
+                    <input id="mqtt-password" name="password" type="password" maxlength="1024" value="" autocomplete="new-password">
+                    <small>Leave blank to keep the current password.</small>
+                </div>
+                <div class="field-group">
+                    <label for="mqtt-client-id">Central client ID</label>
+                    <input id="mqtt-client-id" name="client_id" maxlength="128" value="{{ values.client_id }}" required>
+                    <small>Identifies ANPR Central only; it is not a camera identity.</small>
+                </div>
+                <div class="field-group">
+                    <label for="mqtt-heartbeat-timeout">Camera heartbeat timeout</label>
+                    <input id="mqtt-heartbeat-timeout" name="heartbeat_timeout_seconds" type="number" min="5" max="3600" value="{{ values.heartbeat_timeout_seconds }}" required>
+                    <small>Seconds before a previously online camera becomes offline.</small>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button class="button-primary button-primary--compact" type="submit">Save configuration</button>
+                <button class="button-secondary" type="submit" formaction="/settings/mqtt/test">Test connection</button>
+            </div>
+        </form>
+    </section>
+
+    <aside class="ops-panel" aria-labelledby="mqtt-runtime-title">
+        <header class="panel-header"><div><p class="panel-kicker">Live backend state</p><h2 id="mqtt-runtime-title">Runtime status</h2></div></header>
+        <dl class="system-facts">
+            <div><dt>Status</dt><dd><span class="status-dot {% if runtime.is_connected %}status-dot--online{% else %}status-dot--critical{% endif %}"></span>{{ "Connected" if runtime.is_connected else "Disconnected" }}</dd></div>
+            <div><dt>Broker</dt><dd class="data-text">{{ runtime.host }}:{{ runtime.port }}</dd></div>
+            <div><dt>Central client ID</dt><dd class="data-text">{{ runtime.client_id }}</dd></div>
+            <div><dt>Last connected</dt><dd class="data-text">{{ last_connected_display }}</dd></div>
+            <div><dt>Last error</dt><dd>{{ runtime.last_error or "None" }}</dd></div>
+            <div><dt>Cameras online</dt><dd class="data-text">{{ online_cameras }}</dd></div>
+        </dl>
+        <div class="provisioning-note mqtt-tls-note">
+            <strong>Future security</strong>
+            <p>TLS is not enabled in this milestone. Certificate and server-verification controls will be added separately.</p>
+        </div>
+    </aside>
+</div>
+{% endblock %}

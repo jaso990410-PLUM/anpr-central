@@ -26,6 +26,13 @@ DEFAULT_PERMISSIONS = {
     "events.view": "View ANPR recognition events",
 
     "audit.view": "View audit logs",
+    "settings.manage": "Manage system settings",
+    "access_list.view": "View central access-list records and synchronization state",
+    "access_list.manage": "Create, edit, enable, and synchronize access-list records",
+    "access_list.delete_all_camera": "Delete all access-list records from a camera",
+    "control_board.view": "View control-board configuration and peripheral behavior",
+    "control_board.manage": "Configure control boards, presets, and schedules",
+    "control_board.test": "Send explicit control-board hardware test commands",
 }
 
 

@@ -13,6 +13,9 @@ from app.dependencies.csrf import require_session_csrf
 from app.models.camera import Camera
 from app.models.user import User
 from app.services.audit_service import create_audit_log
+from app.services.access_list_service import AccessListService
+from app.models.access_list_entry import AccessListEntry
+from sqlalchemy import select
 from app.services.camera_service import CameraService, CameraValidationError
 from app.services.dashboard_service import get_dashboard_summary
 from app.services.mqtt_service import mqtt_heartbeat_service
@@ -38,6 +41,7 @@ def _shell_context(
         "navigation": build_navigation(user),
         "user_role_label": role_label(user),
         "mqtt_connected": mqtt_heartbeat_service.is_connected,
+        "live_poll_seconds": settings.live_poll_seconds,
     }
 
 
@@ -89,6 +93,7 @@ def camera_list(
         {
             "cameras": CameraService(db).list_cameras(),
             "can_manage_cameras": user_has_permission(user, "cameras.manage"),
+            "can_view_control_board": user_has_permission(user, "control_board.view"),
         }
     )
     return templates.TemplateResponse(
@@ -182,8 +187,6 @@ def create_camera(
         f"/cameras/{camera.id}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
-
-
 @router.get("/{camera_id}", response_class=HTMLResponse)
 def camera_detail(
     camera_id: UUID,
@@ -198,7 +201,11 @@ def camera_detail(
     context.update(
         {
             "camera": service.camera_detail(camera),
+            "recent_commands": service.recent_commands(camera),
+            "access_sync_summary": service.access_list_sync_summary(camera),
             "can_manage_cameras": user_has_permission(user, "cameras.manage"),
+            "can_view_control_board": user_has_permission(user, "control_board.view"),
+            "can_delete_all_access_list": user_has_permission(user, "access_list.delete_all_camera"),
         }
     )
     return templates.TemplateResponse(
@@ -206,6 +213,61 @@ def camera_detail(
         name="cameras/detail.html",
         context=context,
     )
+
+
+@router.post("/{camera_id}/access-list-sync/{action}")
+def set_camera_access_list_sync(
+    camera_id: UUID,
+    action: str,
+    request: Request,
+    user: User = Depends(require_page_permission("cameras.manage")),
+    _raw_session_token: str = Depends(require_session_csrf),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    if action not in {"enable", "disable"}:
+        raise HTTPException(status_code=404, detail="Unknown camera action")
+    service = CameraService(db)
+    camera = _camera_or_404(service, camera_id)
+    enabled = action == "enable"
+    if service.set_access_list_sync(camera, enabled=enabled):
+        if enabled:
+            access_service = AccessListService(db)
+            entries = db.scalars(select(AccessListEntry).where(AccessListEntry.site_id == camera.site_id)).all()
+            for entry in entries:
+                access_service.ensure_sync_records(entry)
+        create_audit_log(
+            db,
+            action=f"camera.access_list_sync_{action}",
+            actor_user_id=user.id,
+            site_id=camera.site_id,
+            entity_type="camera",
+            entity_id=str(camera.id),
+            details={"camera_code": camera.code, "enabled": enabled},
+            ip_address=request.client.host if request.client else None,
+        )
+        db.commit()
+    return RedirectResponse(f"/cameras/{camera.id}", status_code=303)
+
+
+@router.post("/{camera_id}/access-list/delete-all")
+def delete_all_camera_access_list(
+    camera_id: UUID,
+    request: Request,
+    confirmation: Annotated[str, Form()],
+    user: User = Depends(require_page_permission("access_list.delete_all_camera")),
+    _csrf: str = Depends(require_session_csrf),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    camera = _camera_or_404(CameraService(db), camera_id)
+    if confirmation != "DELETE ALL":
+        raise HTTPException(status_code=400, detail="Type DELETE ALL exactly to confirm")
+    try:
+        command, affected = mqtt_heartbeat_service.delete_all_camera_access_records(camera.id)
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    create_audit_log(db, action="access_list.camera_delete_all", actor_user_id=user.id, site_id=camera.site_id, entity_type="camera", entity_id=str(camera.id), details={"camera_code": camera.code, "command_id": str(command.id), "camera_sync_records_marked_out_of_sync": affected, "central_records_retained": True}, ip_address=request.client.host if request.client else None)
+    db.commit()
+    return RedirectResponse(f"/cameras/{camera.id}?access_list=cleared", status_code=303)
 
 
 def _record_camera_state_action(
@@ -252,8 +314,6 @@ def enable_camera(
         f"/cameras/{camera.id}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
-
-
 @router.post("/{camera_id}/disable")
 def disable_camera(
     camera_id: UUID,
@@ -273,8 +333,6 @@ def disable_camera(
         f"/cameras/{camera.id}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
-
-
 @router.post("/{camera_id}/provisioning/revoke")
 def revoke_camera_provisioning(
     camera_id: UUID,
@@ -293,6 +351,71 @@ def revoke_camera_provisioning(
             camera,
             action="camera.provisioning_revoke",
         )
+    db.commit()
+    return RedirectResponse(
+        f"/cameras/{camera.id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/{camera_id}/provisioning/restore")
+def restore_camera_provisioning(
+    camera_id: UUID,
+    request: Request,
+    serial_number: Annotated[str, Form()],
+    user: User = Depends(require_page_permission("cameras.manage")),
+    _raw_session_token: str = Depends(require_session_csrf),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    service = CameraService(db)
+    camera = _camera_or_404(service, camera_id)
+    try:
+        changed = service.restore_provisioning(
+            camera, serial_number=serial_number
+        )
+    except CameraValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error),
+        ) from error
+    if changed:
+        _record_camera_state_action(
+            request,
+            db,
+            user,
+            camera,
+            action="camera.provisioning_restore",
+        )
+    db.commit()
+    return RedirectResponse(
+        f"/cameras/{camera.id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+@router.post("/{camera_id}/commands/test-led")
+def queue_camera_led_test(
+    camera_id: UUID,
+    request: Request,
+    user: User = Depends(require_page_permission("cameras.manage")),
+    _raw_session_token: str = Depends(require_session_csrf),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    service = CameraService(db)
+    camera = _camera_or_404(service, camera_id)
+    try:
+        mqtt_heartbeat_service.enqueue_led_test(camera)
+    except RuntimeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(error),
+        ) from error
+    _record_camera_state_action(
+        request,
+        db,
+        user,
+        camera,
+        action="camera.command_test_led",
+    )
     db.commit()
     return RedirectResponse(
         f"/cameras/{camera.id}",

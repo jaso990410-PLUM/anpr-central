@@ -10,6 +10,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.camera_command import CameraCommand
+    from app.models.control_board import ControlBoard
     from app.models.site import Site
 
 
@@ -71,6 +73,13 @@ class Camera(Base):
         default=True,
     )
 
+    access_list_sync_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+
     provisioning_state: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
@@ -113,4 +122,12 @@ class Camera(Base):
 
     site: Mapped["Site"] = relationship(
         back_populates="cameras",
+    )
+
+    commands: Mapped[list["CameraCommand"]] = relationship(
+        back_populates="camera",
+        cascade="all, delete-orphan",
+    )
+    control_board: Mapped["ControlBoard | None"] = relationship(
+        back_populates="camera", cascade="all, delete-orphan", uselist=False
     )

@@ -3,14 +3,15 @@
 {% block title %}Camera Management &middot; ANPR Central{% endblock %}
 
 {% block content %}
-<header class="page-header">
+<header class="page-header" data-live-status data-poll-seconds="{{ live_poll_seconds }}">
     <div>
         <p class="eyebrow">Device management</p>
         <h1>Cameras</h1>
         <p>Camera identities, configuration, and provisioning readiness.</p>
     </div>
     <div class="page-header-actions">
-        <span class="status-badge {% if mqtt_connected %}status-badge--online{% else %}status-badge--offline{% endif %}">MQTT {{ "CONNECTED" if mqtt_connected else "DISCONNECTED" }}</span>
+        <span class="status-badge status-badge--online" data-live-indicator>LIVE</span>
+        <span class="status-badge {% if mqtt_connected %}status-badge--online{% else %}status-badge--offline{% endif %}" data-mqtt-status>MQTT {{ "CONNECTED" if mqtt_connected else "DISCONNECTED" }}</span>
         {% if can_manage_cameras %}<a class="button-primary button-primary--compact" href="/cameras/new">Add camera</a>{% endif %}
     </div>
 </header>
@@ -33,6 +34,8 @@
                     <th>Site</th>
                     <th>Direction</th>
                     <th>Manufacturer / model</th>
+                    <th>Protocol</th>
+                    <th>Vendor serial</th>
                     <th>IP address</th>
                     <th>Provisioning</th>
                     <th>Connection</th>
@@ -42,21 +45,23 @@
             </thead>
             <tbody>
                 {% for camera in cameras %}
-                <tr>
+                <tr data-camera-id="{{ camera.id }}">
                     <td><a class="table-link data-text" href="/cameras/{{ camera.id }}">{{ camera.code }}</a></td>
                     <td><strong class="table-primary">{{ camera.name }}</strong></td>
                     <td><strong>{{ camera.site_code }}</strong><small>{{ camera.site_name }}</small></td>
                     <td><span class="status-badge status-badge--{{ camera.direction|lower }}">{{ camera.direction }}</span></td>
                     <td>{{ camera.manufacturer_model }}</td>
+                    <td>{{ camera.protocol }}</td>
+                    <td class="data-text">{{ camera.serial_number or "Not configured" }}</td>
                     <td class="data-text">{{ camera.ip_address or "Not configured" }}</td>
                     <td><span class="status-badge status-badge--{{ camera.provisioning_state|lower|replace('_', '-') }}">{{ camera.provisioning_state }}</span></td>
-                    <td><span class="status-badge status-badge--{{ camera.connection_state|lower|replace('_', '-') }}">{{ camera.connection_state }}</span></td>
+                    <td><span data-camera-state class="status-badge status-badge--{{ camera.connection_state|lower|replace('_', '-') }}">{{ camera.connection_state }}</span></td>
                     <td><span class="status-badge {% if camera.is_enabled %}status-badge--active{% else %}status-badge--disabled{% endif %}">{{ "Enabled" if camera.is_enabled else "Disabled" }}</span></td>
-                    <td class="data-text">{{ camera.last_seen_display or "Never" }}</td>
+                    <td class="data-text" data-camera-last-seen>{{ camera.last_seen_display or "Never" }}</td>
                 </tr>
                 {% else %}
                 <tr class="empty-row">
-                    <td colspan="10">
+                    <td colspan="12">
                         <div class="empty-state">
                             <span class="empty-state__mark" aria-hidden="true"></span>
                             <strong>No cameras configured</strong>
@@ -70,3 +75,5 @@
     </div>
 </section>
 {% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', path='/js/live.js') }}" defer></script>{% endblock %}

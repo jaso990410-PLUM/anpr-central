@@ -12,9 +12,23 @@ os.environ.setdefault(
     "test-only-secret-key-with-at-least-32-characters",
 )
 os.environ.setdefault("ANPR_MQTT_ENABLED", "false")
+os.environ.setdefault("ANPR_MQTT_USERNAME", "")
+os.environ.setdefault("ANPR_MQTT_PASSWORD", "")
 
 from app.db.base import Base  # noqa: E402
 import app.models  # noqa: E402, F401
+from app.services.mqtt_config_service import environment_mqtt_config  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def isolate_mqtt_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.main as main_module
+
+    monkeypatch.setattr(
+        main_module,
+        "_startup_mqtt_configuration",
+        environment_mqtt_config,
+    )
 
 
 @pytest.fixture

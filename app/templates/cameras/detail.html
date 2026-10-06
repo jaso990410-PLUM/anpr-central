@@ -30,35 +30,87 @@
     </section>
 
     <section class="ops-panel camera-detail-panel" aria-labelledby="camera-connection-title">
-        <header class="panel-header"><div><p class="panel-kicker">Provisioning lifecycle</p><h2 id="camera-connection-title">Connection</h2></div></header>
+        <header class="panel-header"><div><p class="panel-kicker">Native transport</p><h2 id="camera-connection-title">Connection</h2></div></header>
         <dl class="detail-list">
             <div><dt>Camera UUID</dt><dd class="data-text">{{ camera.id }}</dd></div>
-            <div><dt>MQTT client identity</dt><dd>Not assigned</dd></div>
+            <div><dt>Protocol</dt><dd>{{ camera.protocol }}</dd></div>
+            <div><dt>Vendor serial number</dt><dd class="data-text">{{ camera.serial_number or "Required for native MQTT" }}</dd></div>
             <div><dt>Provisioning state</dt><dd><span class="status-badge status-badge--{{ camera.provisioning_state|lower|replace('_', '-') }}">{{ camera.provisioning_state }}</span></dd></div>
             <div><dt>Connection state</dt><dd><span class="status-badge status-badge--{{ camera.connection_state|lower|replace('_', '-') }}">{{ camera.connection_state }}</span></dd></div>
             <div><dt>MQTT broker</dt><dd><span class="status-badge {% if mqtt_connected %}status-badge--online{% else %}status-badge--offline{% endif %}">{{ "CONNECTED" if mqtt_connected else "DISCONNECTED" }}</span></dd></div>
             <div><dt>Last seen</dt><dd class="data-text">{{ camera.last_seen_display or "Never" }}</dd></div>
             <div><dt>Last connected</dt><dd class="data-text">{{ camera.last_connected_display or "Never" }}</dd></div>
-            <div><dt>Agent version</dt><dd class="data-text">{{ camera.agent_version or "Not reported" }}</dd></div>
+            <div><dt>Development agent version</dt><dd class="data-text">{{ camera.agent_version or "Not reported" }}</dd></div>
         </dl>
     </section>
 </div>
 
 <section class="ops-panel camera-topics-panel" aria-labelledby="camera-topics-title">
-    <header class="panel-header"><div><p class="panel-kicker">MQTT contract</p><h2 id="camera-topics-title">Topic namespace</h2></div></header>
+    <header class="panel-header"><div><p class="panel-kicker">VisionZenith adapter</p><h2 id="camera-topics-title">Native topic namespace</h2></div></header>
     <div class="topic-grid">
-        <div><span>Status</span><code>{{ camera.status_topic }}</code></div>
-        <div><span>Event</span><code>{{ camera.event_topic }}</code></div>
-        <div><span>Command</span><code>{{ camera.command_topic }}</code></div>
-        <div><span>Whitelist</span><code>{{ camera.whitelist_topic }}</code></div>
+        <div><span>Heartbeat</span><code>{{ camera.native_keep_alive_topic or "Serial number required" }}</code></div>
+        <div><span>Recognition</span><code>{{ camera.native_recognition_topic or "Serial number required" }}</code></div>
+        <div><span>Development heartbeat</span><code>{{ camera.status_topic }}</code></div>
     </div>
-    <p class="panel-note">ANPR Central subscribes to status heartbeats only. Recognition events, commands, and whitelist synchronization are not active in this milestone.</p>
+    <p class="panel-note">Native messages are mapped by vendor serial number to this camera UUID. The custom ANPR heartbeat remains available for MQTTX regression testing.</p>
+</section>
+
+<section class="ops-panel" aria-labelledby="camera-access-list-title">
+    <header class="panel-header"><div><p class="panel-kicker">Edge synchronization</p><h2 id="camera-access-list-title">Access List</h2></div><span class="status-badge {% if camera.access_list_sync_enabled %}status-badge--active{% else %}status-badge--disabled{% endif %}">{{ "Participating" if camera.access_list_sync_enabled else "Not participating" }}</span></header>
+    <div class="dashboard-mqtt-facts">
+        <div><span>Managed entries</span><strong>{{ access_sync_summary.managed }}</strong></div>
+        <div><span>Verified</span><strong>{{ access_sync_summary.verified }}</strong></div>
+        <div><span>Pending</span><strong>{{ access_sync_summary.pending }}</strong></div>
+        <div><span>Mismatch</span><strong>{{ access_sync_summary.mismatch }}</strong></div>
+        <div><span>Unverified</span><strong>{{ access_sync_summary.unverified }}</strong></div>
+    </div>
+    {% if can_manage_cameras %}
+    <form class="panel-actions" method="post" action="/cameras/{{ camera.id }}/access-list-sync/{{ 'disable' if camera.access_list_sync_enabled else 'enable' }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button-secondary" type="submit">{{ "Stop access-list synchronization" if camera.access_list_sync_enabled else "Enable access-list synchronization" }}</button>
+    </form>
+    {% endif %}
+    {% if can_delete_all_access_list %}
+    <div class="alert alert--error"><strong>Danger: clear this camera’s entire access list.</strong> Central Vehicle and Access List records will remain. Synchronization records will be marked out of sync and will not be automatically repopulated by this action.</div>
+    <form method="post" action="/cameras/{{ camera.id }}/access-list/delete-all" class="staff-user-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="field-group"><label for="delete-all-confirmation">Type DELETE ALL to confirm for {{ camera.code }}</label><input id="delete-all-confirmation" name="confirmation" autocomplete="off" required></div>
+        <div class="panel-actions"><button class="button-secondary" type="submit">Delete All Camera Access Records</button></div>
+    </form>
+    {% endif %}
+</section>
+
+{% if can_view_control_board %}
+<section class="ops-panel">
+    <header class="panel-header"><div><p class="panel-kicker">Peripheral behavior</p><h2>Control Board</h2></div><a class="button-secondary" href="/cameras/{{ camera.id }}/control-board">Configure</a></header>
+    <p class="panel-note">Manage this camera’s RS485 channel, controller address, LED rows, traffic-light behavior, speaker settings, and scheduled presets.</p>
+</section>
+{% endif %}
+
+<section class="ops-panel" aria-labelledby="recent-command-title">
+    <header class="panel-header"><div><p class="panel-kicker">Delivery diagnostics</p><h2 id="recent-command-title">Recent commands</h2></div></header>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead><tr><th>Time</th><th>Command</th><th>Status</th></tr></thead>
+            <tbody>
+                {% for command in recent_commands %}
+                <tr><td class="data-text">{{ command.time }}</td><td>{{ command.command }}</td><td><span class="status-badge status-badge--{{ command.status_class }}">{{ command.status }}</span></td></tr>
+                {% else %}
+                <tr class="empty-row"><td colspan="3">No native MQTT commands recorded.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p class="panel-note">Camera acknowledgement confirms request handling only; it does not verify the physical LED, speaker, relay, or display state.</p>
 </section>
 
 <section class="ops-panel camera-actions-panel" aria-labelledby="camera-actions-title">
     <header class="panel-header"><div><p class="panel-kicker">Administrative controls</p><h2 id="camera-actions-title">Actions</h2></div></header>
     <div class="camera-actions">
         {% if can_manage_cameras %}
+            {% if camera.is_enabled and camera.serial_number and camera.provisioning_state != "CREDENTIALS_REVOKED" %}
+            <form method="post" action="/cameras/{{ camera.id }}/commands/test-led"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit">Queue LED test: ANPR</button></form>
+            {% endif %}
             {% if camera.is_enabled %}
             <form method="post" action="/cameras/{{ camera.id }}/disable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit">Disable camera</button></form>
             {% else %}
@@ -68,19 +120,24 @@
             {% if camera.provisioning_state != "CREDENTIALS_REVOKED" %}
             <form method="post" action="/cameras/{{ camera.id }}/provisioning/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary button-secondary--critical" type="submit">Revoke provisioning</button></form>
             {% else %}
-            <button class="button-secondary" type="button" disabled>Re-provision unavailable</button>
+            <form class="camera-reprovision-form" method="post" action="/cameras/{{ camera.id }}/provisioning/restore">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <label for="camera-reprovision-serial">Vendor serial</label>
+                <input id="camera-reprovision-serial" name="serial_number" maxlength="100" value="{{ camera.serial_number or '' }}" placeholder="275688a3-5c6d744b" required>
+                <button class="button-secondary" type="submit">Re-provision camera</button>
+            </form>
             {% endif %}
         {% else %}
         <p class="panel-note">You have read-only access to this camera.</p>
         {% endif %}
     </div>
-    <p class="panel-note">No Connect or Reconnect action is provided. The RA5 agent will own automatic MQTT connection and reconnection.</p>
+    <p class="panel-note">No Connect or Reconnect action is provided. The RA5 camera owns its native MQTT connection and automatic reconnection.</p>
 </section>
 
 <div class="state-reference" aria-label="Connection state reference">
-    <span><strong>UNPROVISIONED</strong> agent not configured</span>
-    <span><strong>CONNECTING</strong> awaiting first confirmed connection</span>
-    <span><strong>PROVISIONED</strong> first authenticated heartbeat confirmed</span>
+    <span><strong>UNPROVISIONED</strong> native MQTT not configured</span>
+    <span><strong>CONNECTING</strong> awaiting first native heartbeat</span>
+    <span><strong>PROVISIONED</strong> first accepted heartbeat confirmed</span>
     <span><strong>ONLINE / OFFLINE</strong> derived only from MQTT heartbeat evidence</span>
 </div>
 {% endblock %}

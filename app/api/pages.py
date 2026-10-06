@@ -10,9 +10,12 @@ from app.db.dependencies import get_db
 from app.dependencies.auth import (
     get_current_user,
     require_authenticated_user_page,
+    user_has_permission,
 )
 from app.models.user import User
 from app.services.dashboard_service import get_dashboard_summary
+from app.services.mqtt_service import mqtt_heartbeat_service
+from app.services.recognition_service import RecognitionService
 from app.services.shell_service import build_navigation, role_label
 from app.web import templates
 
@@ -35,6 +38,7 @@ def dashboard(
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     raw_session_token = request.cookies[settings.session_cookie_name]
+    can_view_events = user_has_permission(user, "events.view")
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -45,6 +49,17 @@ def dashboard(
             "active_page": "dashboard",
             "navigation": build_navigation(user),
             "user_role_label": role_label(user),
+            "mqtt_runtime": mqtt_heartbeat_service.runtime_status(),
+            "can_view_events": can_view_events,
+            "can_manage_access_list": user_has_permission(user, "access_list.manage"),
+            "can_view_cameras": user_has_permission(user, "cameras.view"),
+            "latest_recognition": (
+                RecognitionService(db).latest() if can_view_events else None
+            ),
+            "live_cursor": (
+                RecognitionService(db).current_cursor() if can_view_events else ""
+            ),
+            "live_poll_seconds": settings.live_poll_seconds,
         },
     )
 

@@ -1,4 +1,6 @@
-from pydantic import Field
+from pathlib import Path
+
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,8 +16,23 @@ class Settings(BaseSettings):
 
     mqtt_host: str = "127.0.0.1"
     mqtt_port: int = 1883
+    mqtt_username: str | None = None
+    mqtt_password: SecretStr | None = None
+    mqtt_client_id: str = "anpr-central"
     mqtt_enabled: bool = True
     mqtt_heartbeat_timeout_seconds: int = Field(default=45, gt=0)
+    visionzenith_bv: int = Field(default=17932, ge=0)
+    visionzenith_serial_channel: int = Field(default=0, ge=0, le=1)
+    visionzenith_command_timeout_seconds: int = Field(default=10, gt=0)
+    visionzenith_auto_led_enabled: bool = True
+    control_board_runtime_interval_seconds: int = Field(default=30, ge=5, le=300)
+    recognition_media_dir: Path = Path("var/recognition-media")
+    recognition_correlation_seconds: int = Field(default=10, ge=1, le=120)
+    recognition_page_size: int = Field(default=50, ge=10, le=100)
+    recognition_max_image_bytes: int = Field(
+        default=8 * 1024 * 1024, ge=1024, le=32 * 1024 * 1024
+    )
+    live_poll_seconds: int = Field(default=5, ge=3, le=30)
 
     default_site_code: str = "MAIN"
 

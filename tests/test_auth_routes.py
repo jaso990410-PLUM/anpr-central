@@ -18,6 +18,8 @@ from app.db.dependencies import get_db
 from app.main import app
 from app.models.audit_log import AuditLog
 from app.models.camera import Camera
+from app.models.camera_command import CameraCommand
+from app.models.mqtt_broker_config import MqttBrokerConfig
 from app.models.permission import Permission
 from app.models.role import Role
 from app.models.site import Site
@@ -25,6 +27,7 @@ from app.models.user import User
 from app.models.user_session import UserSession
 from app.services.audit_service import create_audit_log
 from app.services.camera_service import (
+    CONNECTING,
     CREDENTIALS_REVOKED,
     DISABLED,
     ONLINE,
@@ -33,6 +36,11 @@ from app.services.camera_service import (
     CameraService,
 )
 from app.services.session_service import create_session, find_valid_session
+from app.services.mqtt_service import mqtt_heartbeat_service
+from app.services.mqtt_connection_tester import (
+    MqttConnectionTestResult,
+    mqtt_connection_tester,
+)
 from app.services.user_service import UserService
 
 
@@ -1876,12 +1884,17 @@ def test_camera_view_and_manage_permissions_are_enforced(
         f"/cameras/{camera.id}/disable",
         data={"csrf_token": csrf_token},
     )
+    led_test_response = client.post(
+        f"/cameras/{camera.id}/commands/test-led",
+        data={"csrf_token": csrf_token},
+    )
 
     assert camera_list.status_code == 200
     assert detail.status_code == 200
     assert create_page.status_code == 403
     assert create_response.status_code == 403
     assert disable_response.status_code == 403
+    assert led_test_response.status_code == 403
     assert 'href="/cameras/new"' not in camera_list.text
     assert actor.username in detail.text
 
@@ -1948,6 +1961,8 @@ def test_create_camera_stores_configuration_unprovisioned_state_and_audit(
     assert camera_list.status_code == 200
     assert "MAIN-ENTRY-01" in camera_list.text
     assert "Neutral Vision / NV-RA5" in camera_list.text
+    assert "VisionZenith Native MQTT" in camera_list.text
+    assert "SN-10001" in camera_list.text
     assert "192.0.2.10" in camera_list.text
     assert "Never" in camera_list.text
     assert 'href="/cameras/new"' in camera_list.text
@@ -1957,9 +1972,8 @@ def test_create_camera_stores_configuration_unprovisioned_state_and_audit(
     assert 'status-badge--unprovisioned">UNPROVISIONED' in detail.text
     assert "Never" in detail.text
     assert f"anpr/{camera.id}/status" in detail.text
-    assert f"anpr/{camera.id}/event" in detail.text
-    assert f"anpr/{camera.id}/command" in detail.text
-    assert f"anpr/{camera.id}/whitelist" in detail.text
+    assert "VisionZenith Native MQTT" in detail.text
+    assert "device/SN-10001/message/up/keep_alive" in detail.text
     assert ">Connect</button>" not in detail.text
     assert ">Reconnect</button>" not in detail.text
 
@@ -1983,6 +1997,15 @@ def test_camera_pages_render_live_heartbeat_state(
         agent_version="1.0.0",
     )
     db.add(camera)
+    db.flush()
+    db.add(
+        CameraCommand(
+            camera_id=camera.id,
+            request_id="display-1",
+            command_type="display_plate",
+            status="CAMERA_ACKNOWLEDGED",
+        )
+    )
     db.commit()
     assert login(client).status_code == 303
 
@@ -1998,7 +2021,52 @@ def test_camera_pages_render_live_heartbeat_state(
     assert "2026-09-27 18:30:00" in detail.text
     assert "2026-09-27 18:29:00" in detail.text
     assert "1.0.0" in detail.text
+    assert "Display plate" in detail.text
+    assert "Camera acknowledged" in detail.text
     assert "derived only from MQTT heartbeat evidence" in detail.text
+
+
+def test_camera_led_diagnostic_uses_permission_csrf_and_audit(
+    client: TestClient,
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actor = create_user(
+        db, permissions=("cameras.view", "cameras.manage")
+    )
+    site = create_site(db)
+    camera = Camera(
+        site_id=site.id,
+        code="MAIN-ENTRY-01",
+        name="Main Entry",
+        direction="ENTRY",
+        serial_number="275688a3-5c6d744b",
+        is_enabled=True,
+    )
+    db.add(camera)
+    db.commit()
+    queued: list[uuid.UUID] = []
+    monkeypatch.setattr(
+        mqtt_heartbeat_service,
+        "enqueue_led_test",
+        lambda target: queued.append(target.id),
+    )
+    assert login(client).status_code == 303
+    detail = client.get(f"/cameras/{camera.id}")
+
+    response = client.post(
+        f"/cameras/{camera.id}/commands/test-led",
+        data={"csrf_token": extract_csrf_token(detail.text)},
+    )
+
+    assert response.status_code == 303
+    assert queued == [camera.id]
+    audit = db.scalar(
+        select(AuditLog).where(
+            AuditLog.action == "camera.command_test_led"
+        )
+    )
+    assert audit is not None and audit.actor_user_id == actor.id
 
 
 @pytest.mark.parametrize(
@@ -2125,7 +2193,88 @@ def test_camera_provisioning_revoke_is_real_and_does_not_fake_connectivity(
     assert "hash" not in audit_text
     revoked_detail = client.get(f"/cameras/{camera.id}")
     assert "CREDENTIALS_REVOKED" in revoked_detail.text
-    assert "Re-provision unavailable" in revoked_detail.text
+    assert "Re-provision camera" in revoked_detail.text
+
+
+def test_camera_provisioning_restore_sets_serial_connecting_and_audits(
+    client: TestClient,
+    db: Session,
+) -> None:
+    create_user(db, permissions=("cameras.view", "cameras.manage"))
+    site = create_site(db)
+    camera = Camera(
+        site_id=site.id,
+        code="MAIN-ENTRY-01",
+        name="Main Entry",
+        direction="ENTRY",
+        is_enabled=True,
+        provisioning_state=CREDENTIALS_REVOKED,
+    )
+    db.add(camera)
+    db.commit()
+    assert login(client).status_code == 303
+    detail = client.get(f"/cameras/{camera.id}")
+
+    response = client.post(
+        f"/cameras/{camera.id}/provisioning/restore",
+        data={
+            "csrf_token": extract_csrf_token(detail.text),
+            "serial_number": "275688a3-5c6d744b",
+        },
+    )
+
+    assert response.status_code == 303
+    db.refresh(camera)
+    assert camera.serial_number == "275688a3-5c6d744b"
+    assert camera.provisioning_state == CONNECTING
+    assert CameraService(db).camera_detail(camera).connection_state == CONNECTING
+    audit = db.scalar(
+        select(AuditLog).where(
+            AuditLog.action == "camera.provisioning_restore"
+        )
+    )
+    assert audit is not None
+    assert "275688a3-5c6d744b" not in str(audit.details)
+
+
+def test_camera_provisioning_restore_rejects_duplicate_serial(
+    client: TestClient,
+    db: Session,
+) -> None:
+    create_user(db, permissions=("cameras.view", "cameras.manage"))
+    site = create_site(db)
+    camera = Camera(
+        site_id=site.id,
+        code="MAIN-ENTRY-01",
+        name="Main Entry",
+        direction="ENTRY",
+        provisioning_state=CREDENTIALS_REVOKED,
+    )
+    other_camera = Camera(
+        site_id=site.id,
+        code="MAIN-EXIT-01",
+        name="Main Exit",
+        direction="EXIT",
+        serial_number="SN-IN-USE",
+    )
+    db.add_all((camera, other_camera))
+    db.commit()
+    assert login(client).status_code == 303
+    detail = client.get(f"/cameras/{camera.id}")
+
+    response = client.post(
+        f"/cameras/{camera.id}/provisioning/restore",
+        data={
+            "csrf_token": extract_csrf_token(detail.text),
+            "serial_number": "sn-in-use",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "That serial number is already in use."
+    db.refresh(camera)
+    assert camera.serial_number is None
+    assert camera.provisioning_state == CREDENTIALS_REVOKED
 
 
 @pytest.mark.parametrize(
@@ -2135,6 +2284,10 @@ def test_camera_provisioning_revoke_is_real_and_does_not_fake_connectivity(
         ("disable", {"csrf_token": "invalid"}),
         ("provisioning/revoke", {}),
         ("provisioning/revoke", {"csrf_token": "invalid"}),
+        ("provisioning/restore", {"serial_number": "SN-RESTORE"}),
+        ("provisioning/restore", {"csrf_token": "invalid", "serial_number": "SN-RESTORE"}),
+        ("commands/test-led", {}),
+        ("commands/test-led", {"csrf_token": "invalid"}),
     ],
 )
 def test_camera_actions_reject_missing_or_invalid_csrf(
@@ -2189,6 +2342,200 @@ def test_camera_creation_rejects_missing_or_invalid_csrf(
 
     assert response.status_code == 403
     assert db.scalar(select(Camera)) is None
+
+
+def mqtt_settings_form(csrf_token: str, **overrides: str) -> dict[str, str]:
+    values = {
+        "csrf_token": csrf_token,
+        "mqtt_enabled": "true",
+        "host": "broker.internal",
+        "port": "1883",
+        "username": "anpr",
+        "password": "",
+        "client_id": "anpr-central",
+        "heartbeat_timeout_seconds": "45",
+    }
+    values.update(overrides)
+    return values
+
+
+def test_mqtt_settings_permission_navigation_and_dashboard_status(
+    client: TestClient,
+    db: Session,
+) -> None:
+    create_user(db, permissions=("settings.manage",))
+    create_site(db)
+    assert login(client).status_code == 303
+
+    settings_page = client.get("/settings/mqtt")
+    dashboard = client.get("/dashboard")
+
+    assert settings_page.status_code == 200
+    assert "Broker connection" in settings_page.text
+    assert 'href="/settings/mqtt"' in settings_page.text
+    assert "MQTT DISCONNECTED" in dashboard.text
+    assert "Cameras online" in dashboard.text
+
+
+def test_mqtt_settings_without_permission_is_denied(
+    client: TestClient,
+    db: Session,
+) -> None:
+    create_user(db, permissions=())
+    create_site(db)
+    assert login(client).status_code == 303
+
+    assert client.get("/settings/mqtt").status_code == 403
+    dashboard = client.get("/dashboard")
+    assert 'href="/settings/mqtt"' not in dashboard.text
+
+
+def test_mqtt_settings_save_encrypts_redacts_audits_and_reconfigures(
+    client: TestClient,
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_user(db, permissions=("settings.manage",))
+    create_site(db)
+    assert login(client).status_code == 303
+    page = client.get("/settings/mqtt")
+    applied = []
+    monkeypatch.setattr(
+        mqtt_heartbeat_service,
+        "reconfigure",
+        lambda configuration: applied.append(configuration),
+    )
+
+    response = client.post(
+        "/settings/mqtt",
+        data=mqtt_settings_form(
+            extract_csrf_token(page.text),
+            host="192.168.100.11",
+            password="super-private-broker-password",
+            heartbeat_timeout_seconds="60",
+        ),
+    )
+
+    assert response.status_code == 303
+    record = db.get(MqttBrokerConfig, 1)
+    assert record is not None
+    assert record.host == "192.168.100.11"
+    assert record.heartbeat_timeout_seconds == 60
+    assert record.password_ciphertext != "super-private-broker-password"
+    assert "super-private-broker-password" not in (record.password_ciphertext or "")
+    assert len(applied) == 1
+    audit = db.scalar(
+        select(AuditLog).where(
+            AuditLog.action == "mqtt.configuration_update"
+        )
+    )
+    assert audit is not None
+    audit_text = str(audit.details)
+    assert "super-private-broker-password" not in audit_text
+    assert "ciphertext" not in audit_text.lower()
+    refreshed = client.get("/settings/mqtt")
+    assert "super-private-broker-password" not in refreshed.text
+    assert 'id="mqtt-password"' in refreshed.text
+    assert 'type="password"' in refreshed.text
+    assert 'value=""' in refreshed.text
+
+
+def test_mqtt_test_connection_is_isolated_and_audited(
+    client: TestClient,
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_user(db, permissions=("settings.manage",))
+    create_site(db)
+    assert login(client).status_code == 303
+    page = client.get("/settings/mqtt")
+    tested = []
+    monkeypatch.setattr(
+        mqtt_connection_tester,
+        "test",
+        lambda configuration: (
+            tested.append(configuration)
+            or MqttConnectionTestResult(True, "Broker handshake succeeded")
+        ),
+    )
+    monkeypatch.setattr(
+        mqtt_heartbeat_service,
+        "reconfigure",
+        lambda _configuration: pytest.fail(
+            "connection test must not reconfigure the production client"
+        ),
+    )
+
+    response = client.post(
+        "/settings/mqtt/test",
+        data=mqtt_settings_form(extract_csrf_token(page.text)),
+    )
+
+    assert response.status_code == 200
+    assert "Broker handshake succeeded" in response.text
+    assert len(tested) == 1
+    assert db.get(MqttBrokerConfig, 1) is None
+    audit = db.scalar(
+        select(AuditLog).where(AuditLog.action == "mqtt.connection_test")
+    )
+    assert audit is not None
+    assert audit.details["success"] is True
+
+
+@pytest.mark.parametrize(
+    ("path", "data"),
+    [
+        ("/settings/mqtt", {}),
+        ("/settings/mqtt", {"csrf_token": "invalid"}),
+        ("/settings/mqtt/test", {}),
+        ("/settings/mqtt/test", {"csrf_token": "invalid"}),
+    ],
+)
+def test_mqtt_settings_actions_require_csrf(
+    client: TestClient,
+    db: Session,
+    path: str,
+    data: dict[str, str],
+) -> None:
+    create_user(db, permissions=("settings.manage",))
+    create_site(db)
+    assert login(client).status_code == 303
+    submitted = mqtt_settings_form(data.get("csrf_token", ""))
+    if "csrf_token" not in data:
+        submitted.pop("csrf_token")
+
+    assert client.post(path, data=submitted).status_code == 403
+    assert db.get(MqttBrokerConfig, 1) is None
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"host": "https://bad/host"}, "valid broker hostname"),
+        ({"port": "70000"}, "between 1 and 65535"),
+        ({"client_id": "bad client"}, "without spaces"),
+        ({"heartbeat_timeout_seconds": "1"}, "between 5 and 3600"),
+    ],
+)
+def test_mqtt_settings_validation_errors_are_safe(
+    client: TestClient,
+    db: Session,
+    overrides: dict[str, str],
+    message: str,
+) -> None:
+    create_user(db, permissions=("settings.manage",))
+    create_site(db)
+    assert login(client).status_code == 303
+    page = client.get("/settings/mqtt")
+
+    response = client.post(
+        "/settings/mqtt",
+        data=mqtt_settings_form(extract_csrf_token(page.text), **overrides),
+    )
+
+    assert response.status_code == 400
+    assert message in response.text
+    assert db.get(MqttBrokerConfig, 1) is None
 
 
 @pytest.mark.parametrize(

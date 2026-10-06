@@ -9,7 +9,9 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
+from app.models.camera_command import CameraCommand
 from app.models.camera import Camera
+from app.models.access_list_camera_sync import AccessListCameraSync
 from app.models.site import Site
 
 
@@ -37,10 +39,13 @@ class CameraListItem:
     site_name: str
     direction: str
     manufacturer_model: str
+    protocol: str
+    serial_number: str | None
     ip_address: str | None
     provisioning_state: str
     connection_state: str
     is_enabled: bool
+    access_list_sync_enabled: bool
     last_seen_display: str | None
 
 
@@ -58,11 +63,15 @@ class CameraDetail:
     serial_number: str | None
     ip_address: str | None
     is_enabled: bool
+    access_list_sync_enabled: bool
     provisioning_state: str
     connection_state: str
     last_seen_display: str | None
     last_connected_display: str | None
     agent_version: str | None
+    protocol: str
+    native_keep_alive_topic: str | None
+    native_recognition_topic: str | None
     status_topic: str
     event_topic: str
     command_topic: str
@@ -88,10 +97,13 @@ class CameraService:
                 site_name=camera.site.name,
                 direction=camera.direction,
                 manufacturer_model=_manufacturer_model(camera),
+                protocol="VisionZenith Native MQTT",
+                serial_number=camera.serial_number,
                 ip_address=camera.ip_address,
                 provisioning_state=camera.provisioning_state,
                 connection_state=connection_state(camera),
                 is_enabled=camera.is_enabled,
+                access_list_sync_enabled=camera.access_list_sync_enabled,
                 last_seen_display=_display_time(
                     camera.last_seen_at,
                     camera.site.timezone,
@@ -114,6 +126,11 @@ class CameraService:
 
     def camera_detail(self, camera: Camera) -> CameraDetail:
         topic_root = f"anpr/{camera.id}"
+        native_root = (
+            f"device/{camera.serial_number}/message"
+            if camera.serial_number
+            else None
+        )
         return CameraDetail(
             id=camera.id,
             code=camera.code,
@@ -127,6 +144,7 @@ class CameraService:
             serial_number=camera.serial_number,
             ip_address=camera.ip_address,
             is_enabled=camera.is_enabled,
+            access_list_sync_enabled=camera.access_list_sync_enabled,
             provisioning_state=camera.provisioning_state,
             connection_state=connection_state(camera),
             last_seen_display=_display_time(
@@ -138,11 +156,87 @@ class CameraService:
                 camera.site.timezone,
             ),
             agent_version=camera.agent_version,
+            protocol="VisionZenith Native MQTT",
+            native_keep_alive_topic=(
+                f"{native_root}/up/keep_alive" if native_root else None
+            ),
+            native_recognition_topic=(
+                f"{native_root}/up/quick_ivs_result" if native_root else None
+            ),
             status_topic=f"{topic_root}/status",
             event_topic=f"{topic_root}/event",
             command_topic=f"{topic_root}/command",
             whitelist_topic=f"{topic_root}/whitelist",
         )
+
+    def recent_commands(
+        self, camera: Camera, *, limit: int = 8
+    ) -> tuple[dict[str, str], ...]:
+        commands = self.db.scalars(
+            select(CameraCommand)
+            .where(CameraCommand.camera_id == camera.id)
+            .order_by(CameraCommand.requested_at.desc())
+            .limit(limit)
+        ).all()
+        command_labels = {
+            "display_plate": "Display plate",
+            "idle_display": "Idle display",
+            "traffic_green": "Green timer",
+            "traffic_red": "Red / release",
+            "voice": "Voice",
+            "access_select": "Access-list query",
+            "access_update": "Access-list update",
+        }
+        status_labels = {
+            "QUEUED": "Queued",
+            "PUBLISHED": "Published",
+            "CAMERA_ACKNOWLEDGED": "Camera acknowledged",
+            "CAMERA_REJECTED": "Camera rejected",
+            "PUBLISH_FAILED": "Publish failed",
+            "TIMEOUT_UNCERTAIN": "Timeout / uncertain",
+            "READBACK_VERIFIED": "Readback verified",
+            "READBACK_MISMATCH": "Readback mismatch",
+            "READBACK_UNVERIFIED": "Readback unverified",
+        }
+        return tuple(
+            {
+                "time": _display_time(
+                    command.requested_at, camera.site.timezone
+                )
+                or "Unknown",
+                "command": command_labels.get(
+                    command.command_type,
+                    command.command_type.replace("_", " ").title(),
+                ),
+                "status": status_labels.get(
+                    command.status, command.status.replace("_", " ").title()
+                ),
+                "status_class": command.status.lower().replace("_", "-"),
+            }
+            for command in commands
+        )
+
+    def set_access_list_sync(self, camera: Camera, *, enabled: bool) -> bool:
+        if camera.access_list_sync_enabled == enabled:
+            return False
+        camera.access_list_sync_enabled = enabled
+        self.db.flush()
+        return True
+
+    def access_list_sync_summary(self, camera: Camera) -> dict[str, int]:
+        rows = self.db.execute(
+            select(AccessListCameraSync.status, func.count())
+            .where(AccessListCameraSync.camera_id == camera.id)
+            .group_by(AccessListCameraSync.status)
+        ).all()
+        counts = {status: count for status, count in rows}
+        return {
+            "managed": sum(counts.values()),
+            "verified": counts.get("VERIFIED", 0),
+            "pending": counts.get("PENDING", 0) + counts.get("SYNCING", 0) + counts.get("CAMERA_OFFLINE", 0),
+            "mismatch": counts.get("MISMATCH", 0),
+            "unverified": counts.get("PARTIALLY_VERIFIED", 0) + counts.get("TIMEOUT_UNCERTAIN", 0) + counts.get("ERROR", 0),
+        }
 
     def create_camera(
         self,
@@ -225,6 +319,38 @@ class CameraService:
     def revoke_provisioning(self, camera: Camera) -> bool:
         changed = camera.provisioning_state != CREDENTIALS_REVOKED
         camera.provisioning_state = CREDENTIALS_REVOKED
+        camera.connection_state = None
+        self.db.flush()
+        return changed
+
+    def restore_provisioning(
+        self, camera: Camera, *, serial_number: str
+    ) -> bool:
+        clean_serial = _clean_optional(serial_number)
+        if clean_serial is None:
+            raise CameraValidationError(
+                "Vendor serial number is required for native MQTT."
+            )
+        if len(clean_serial) > 100:
+            raise CameraValidationError(
+                "Serial number must contain at most 100 characters."
+            )
+        duplicate = self.db.scalar(
+            select(Camera.id).where(
+                func.lower(Camera.serial_number) == clean_serial.lower(),
+                Camera.id != camera.id,
+            )
+        )
+        if duplicate is not None:
+            raise CameraValidationError(
+                "That serial number is already in use."
+            )
+        changed = (
+            camera.provisioning_state != CONNECTING
+            or camera.serial_number != clean_serial
+        )
+        camera.serial_number = clean_serial
+        camera.provisioning_state = CONNECTING
         camera.connection_state = None
         self.db.flush()
         return changed

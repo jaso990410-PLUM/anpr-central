@@ -24,9 +24,12 @@ class NavigationGroup:
 _PERMISSION_NAVIGATION = (
     ("Management", "sites", "Sites", "site", "sites.view", None),
     ("Management", "cameras", "Cameras", "camera", "cameras.view", "/cameras"),
+    ("Management", "peripheral-presets", "Peripheral Presets", "control-board", "control_board.view", "/peripheral-presets"),
+    ("Management", "access-list", "Access List", "access-list", "access_list.view", "/access-list"),
     ("Management", "users", "Users", "users", "users.view", "/users"),
-    ("Monitoring", "recognition", "Recognition History", "recognition", "events.view", None),
+    ("Monitoring", "recognition", "Recognition History", "recognition", "events.view", "/recognition"),
     ("Monitoring", "audit", "Audit Log", "audit", "audit.view", "/audit"),
+    ("System", "mqtt-settings", "MQTT Broker", "settings", "settings.manage", "/settings/mqtt"),
 )
 
 
@@ -71,7 +74,7 @@ def build_navigation(
                 NavigationItem(key=key, label=label, icon=icon, href=href)
             )
 
-    grouped["System"] = [account_item]
+    grouped.setdefault("System", []).append(account_item)
 
     return tuple(
         NavigationGroup(label=label, items=tuple(items))

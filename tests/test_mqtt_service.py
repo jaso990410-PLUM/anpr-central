@@ -4,6 +4,7 @@ import json
 import uuid
 
 import pytest
+from pydantic import SecretStr
 from paho.mqtt.packettypes import PacketTypes
 from paho.mqtt.reasoncodes import ReasonCode
 from fastapi.testclient import TestClient
@@ -26,6 +27,24 @@ from app.services.mqtt_service import (
     parse_heartbeat,
     process_heartbeat,
 )
+from app.integrations.visionzenith.topics import SUBSCRIPTIONS
+from app.services.mqtt_config_service import EffectiveMqttConfig
+
+
+class FakeRecognitionWorker:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, bytes, bool]] = []
+
+    def enqueue(
+        self,
+        serial_number: str,
+        message_type: str,
+        payload: bytes,
+        *,
+        retained: bool,
+    ) -> bool:
+        self.calls.append((serial_number, message_type, payload, retained))
+        return True
 
 
 def create_camera(db: Session, *, enabled: bool = True) -> Camera:
@@ -63,6 +82,52 @@ def heartbeat_payload(
     if agent_version is not None:
         document["agentVersion"] = agent_version
     return json.dumps(document).encode()
+
+
+def test_native_recognition_is_delegated_without_database_work() -> None:
+    database_opened = False
+
+    def forbidden_session_factory():
+        nonlocal database_opened
+        database_opened = True
+        raise AssertionError("MQTT worker must not persist recognition inline")
+
+    service = MqttHeartbeatService(session_factory=forbidden_session_factory)
+    recognition_worker = FakeRecognitionWorker()
+    service._recognition_worker = recognition_worker
+
+    service._process_queued_message(
+        "device/RA5-SERIAL/message/up/quick_ivs_result",
+        b'{"payload":{}}',
+        retained=False,
+    )
+
+    assert not database_opened
+    assert recognition_worker.calls == [
+        ("RA5-SERIAL", "quick_ivs_result", b'{"payload":{}}', False)
+    ]
+
+
+def test_native_heartbeat_enqueues_safe_pending_access_sync(db: Session) -> None:
+    target = create_camera(db)
+    target.serial_number = "RA5-ACCESS"
+    db.commit()
+    queued: list[uuid.UUID] = []
+
+    class FakeAccessSync:
+        def enqueue_pending_for_camera(self, camera_id):
+            queued.append(camera_id)
+            return 1
+
+    service = MqttHeartbeatService(session_factory=lambda: Session(db.get_bind(), expire_on_commit=False))
+    service._command_manager = object()
+    service._access_sync = FakeAccessSync()
+    service._process_queued_message(
+        "device/RA5-ACCESS/message/up/keep_alive",
+        b'{"sn":"RA5-ACCESS"}',
+    )
+
+    assert queued == [target.id]
 
 
 def test_valid_heartbeat_sets_online_seen_connected_and_agent_version(
@@ -237,6 +302,7 @@ class FakeMqttClient:
     def __init__(self, *, fail_connect: bool = False):
         self.fail_connect = fail_connect
         self.on_connect = None
+        self.on_connect_fail = None
         self.on_disconnect = None
         self.on_message = None
         self.reconnect_delays = None
@@ -245,6 +311,7 @@ class FakeMqttClient:
         self.loop_stopped = False
         self.disconnected = False
         self.subscriptions: list[tuple[str, int]] = []
+        self.credentials = None
 
     def reconnect_delay_set(self, *, min_delay: int, max_delay: int) -> None:
         self.reconnect_delays = (min_delay, max_delay)
@@ -265,6 +332,9 @@ class FakeMqttClient:
 
     def subscribe(self, topic: str, *, qos: int) -> None:
         self.subscriptions.append((topic, qos))
+
+    def username_pw_set(self, username: str, password: str | None) -> None:
+        self.credentials = (username, password)
 
 
 def test_mqtt_service_lifecycle_subscribes_and_stops_cleanly() -> None:
@@ -291,7 +361,7 @@ def test_mqtt_service_lifecycle_subscribes_and_stops_cleanly() -> None:
     )
     assert service.is_connected
     assert service.status_label == "CONNECTED"
-    assert fake_client.subscriptions == [(STATUS_TOPIC, 1)]
+    assert fake_client.subscriptions == [(STATUS_TOPIC, 1), *SUBSCRIPTIONS]
 
     service.stop()
     assert fake_client.disconnected
@@ -309,6 +379,68 @@ def test_initial_mqtt_outage_does_not_crash_service() -> None:
     service.start()
     assert not service.is_connected
     assert service.status_label == "DISCONNECTED"
+    service.stop()
+
+
+def test_runtime_reconfigure_reuses_one_lifecycle_and_disable_stops() -> None:
+    clients = [FakeMqttClient(), FakeMqttClient()]
+    service = MqttHeartbeatService(
+        session_factory=lambda: pytest.fail("database should not be used"),
+        client_factory=lambda: clients.pop(0),
+    )
+    first = EffectiveMqttConfig(
+        True,
+        "broker-one.internal",
+        1883,
+        "anpr",
+        SecretStr("secret-one"),
+        "central-one",
+        45,
+    )
+    first_client = clients[0]
+
+    service.reconfigure(first)
+    assert service.is_running
+    assert first_client.connect_args == ("broker-one.internal", 1883, 60)
+    assert first_client.credentials == ("anpr", "secret-one")
+    first_client.on_connect(first_client, None, None, 0, None)
+    status = service.runtime_status()
+    assert status.is_connected
+    assert status.last_connected_at is not None
+    assert status.last_error is None
+
+    disabled = EffectiveMqttConfig(
+        False,
+        "broker-one.internal",
+        1883,
+        "anpr",
+        SecretStr("secret-one"),
+        "central-one",
+        45,
+    )
+    service.reconfigure(disabled)
+    assert not service.is_running
+    assert first_client.disconnected
+    assert first_client.loop_stopped
+    assert service.runtime_status().is_enabled is False
+
+    second = EffectiveMqttConfig(
+        True,
+        "broker-two.internal",
+        2883,
+        None,
+        None,
+        "central-two",
+        60,
+    )
+    second_client = clients[0]
+    service.reconfigure(second)
+    assert service.is_running
+    assert second_client.connect_args == ("broker-two.internal", 2883, 60)
+    second_client.on_connect(second_client, None, None, "Not authorized", None)
+    assert service.runtime_status().last_error == "Authentication failed"
+    second_client.on_connect_fail(second_client, None)
+    assert service.runtime_status().last_error == "Broker is unreachable"
     service.stop()
 
 
@@ -332,7 +464,7 @@ class FakeLifecycleService:
         self.started = False
         self.stopped = False
 
-    def start(self) -> None:
+    def reconfigure(self, _configuration) -> None:
         self.started = True
 
     def stop(self) -> None:
@@ -347,6 +479,11 @@ def test_fastapi_lifecycle_starts_stops_mqtt_and_outage_preserves_health(
     monkeypatch.setattr(main_module, "mqtt_heartbeat_service", lifecycle_service)
     monkeypatch.setattr(main_module.settings, "mqtt_enabled", True)
     monkeypatch.setattr(main_module, "engine", FakeEngine())
+    monkeypatch.setattr(
+        main_module,
+        "_startup_mqtt_configuration",
+        lambda: object(),
+    )
 
     with TestClient(main_module.app) as client:
         assert lifecycle_service.started

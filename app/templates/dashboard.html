@@ -82,6 +82,33 @@
     </article>
 </section>
 
+<section class="ops-panel dashboard-mqtt-panel" aria-labelledby="dashboard-mqtt-title" {% if can_view_cameras %}data-live-status data-poll-seconds="{{ live_poll_seconds }}"{% endif %}>
+    <header class="panel-header">
+        <div><p class="panel-kicker">Central transport</p><h2 id="dashboard-mqtt-title">MQTT broker</h2></div>
+        <div class="page-header-actions"><span class="status-badge status-badge--online" data-live-indicator>LIVE</span><span class="status-badge {% if mqtt_runtime.is_connected %}status-badge--online{% else %}status-badge--offline{% endif %}" data-mqtt-status>MQTT {{ "CONNECTED" if mqtt_runtime.is_connected else "DISCONNECTED" }}</span></div>
+    </header>
+    <div class="dashboard-mqtt-facts">
+        <div><span>Broker</span><strong class="data-text" data-broker-endpoint>{{ mqtt_runtime.host }}:{{ mqtt_runtime.port }}</strong></div>
+        <div><span>Cameras online</span><strong class="data-text" data-cameras-online>{{ summary.online_camera_count }}</strong></div>
+        <div><span>Central client</span><strong class="data-text">{{ mqtt_runtime.client_id }}</strong></div>
+    </div>
+</section>
+
+{% if can_view_events %}
+<section class="ops-panel latest-recognition-panel" aria-labelledby="latest-recognition-title" data-live-recognitions data-cursor="{{ live_cursor or '' }}" data-poll-seconds="{{ live_poll_seconds }}" data-can-manage-access="{{ 'true' if can_manage_access_list else 'false' }}">
+    <header class="panel-header"><div><p class="panel-kicker">Live ANPR</p><h2 id="latest-recognition-title">Latest recognition</h2></div><a class="button-quiet" href="/recognition">View history</a></header>
+    <div class="latest-recognition" data-latest-recognition {% if not latest_recognition %}hidden{% endif %}>
+        <div class="latest-recognition__image">{% if latest_recognition and latest_recognition.plate_image_url %}<img data-latest-image src="{{ latest_recognition.plate_image_url }}" alt="Latest recognized plate">{% else %}<span data-latest-image-placeholder>No image</span>{% endif %}</div>
+        <div><span class="metric-label">Plate</span><strong class="plate-value plate-value--large" data-latest-plate>{{ latest_recognition.plate if latest_recognition else "—" }}</strong></div>
+        <div><span>Camera</span><strong class="data-text" data-latest-camera>{{ latest_recognition.camera_name if latest_recognition else "—" }}</strong></div>
+        <div><span>Direction</span><strong data-latest-direction>{{ latest_recognition.direction if latest_recognition else "—" }}</strong></div>
+        <div><span>Access</span><strong><span class="status-badge status-badge--{{ latest_recognition.access_badge_tone if latest_recognition else 'neutral' }}" data-latest-access>{{ latest_recognition.access_label if latest_recognition else "—" }}</span></strong></div>
+        <div><span>Recognition time</span><strong class="data-text" data-latest-time>{{ latest_recognition.captured_time_display if latest_recognition else "—" }}</strong></div>
+    </div>
+    <div class="empty-state" data-latest-empty {% if latest_recognition %}hidden{% endif %}><strong>No recognitions received</strong><span>The latest native event will appear automatically.</span></div>
+</section>
+{% endif %}
+
 <section class="dashboard-grid">
     <article class="ops-panel activity-panel" aria-labelledby="camera-status-title">
         <header class="panel-header">
@@ -106,17 +133,17 @@
                 </thead>
                 <tbody>
                     {% for camera in summary.cameras %}
-                    <tr>
+                    <tr data-camera-id="{{ camera.id }}">
                         <td><strong class="table-primary">{{ camera.name }}</strong><small>{{ camera.code }}</small></td>
                         <td>{{ camera.site_code }}</td>
                         <td><span class="status-badge status-badge--{{ camera.direction | lower }}">{{ camera.direction }}</span></td>
                         <td>{{ camera.ip_address or "Not configured" }}</td>
                         <td>
-                            <span class="status-badge {% if camera.is_enabled %}status-badge--active{% else %}status-badge--disabled{% endif %}">
-                                {{ "Enabled" if camera.is_enabled else "Disabled" }}
+                            <span class="status-badge status-badge--{{ camera.connection_state|lower|replace('_', '-') }}" data-camera-state>
+                                {{ camera.connection_state }}
                             </span>
                         </td>
-                        <td>{{ camera.last_seen_display or "Never" }}</td>
+                        <td data-camera-last-seen>{{ camera.last_seen_display or "Never" }}</td>
                     </tr>
                     {% else %}
                     <tr class="empty-row">
@@ -156,3 +183,5 @@
     </aside>
 </section>
 {% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', path='/js/live.js') }}" defer></script>{% endblock %}

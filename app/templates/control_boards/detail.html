@@ -1,0 +1,49 @@
+{% extends "base_app.html" %}
+{% block title %}Control Board · {{ camera.code }}{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">Peripheral control</p><h1>{{ camera.code }} Control Board</h1><p>{{ camera.name }} · {{ camera.site.code }}</p></div><a class="button-secondary" href="/cameras/{{ camera.id }}">Back to camera</a></header>
+{% if error %}<div class="alert alert--error">{{ error }}</div>{% endif %}
+<section class="ops-panel">
+ <header class="panel-header"><div><p class="panel-kicker">Central desired state</p><h2>RS485 communication</h2></div><span class="status-badge status-badge--{{ (board.communication_sync_status if board else 'unconfigured')|lower|replace('_','-') }}">{{ board.communication_sync_status if board else "UNCONFIGURED" }}</span></header>
+ <p class="panel-note">The RA5 MQTT get/set capability is documented by VisionZenith but has not yet been physically verified on this installation. Saving changes updates Central only; use Sync to Camera explicitly.</p>
+ <form method="post" class="staff-user-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="form-grid">
+   <div class="field-group checkbox-field"><label><input type="checkbox" name="enabled" value="true" {% if not board or board.enabled %}checked{% endif %}> Enable control board</label></div>
+   <div class="field-group"><label>Serial channel</label><select name="serial_channel"><option value="0" {% if not board or board.serial_channel == 0 %}selected{% endif %}>Channel 0</option><option value="1" {% if board and board.serial_channel == 1 %}selected{% endif %}>Channel 1</option></select></div>
+   <div class="field-group"><label>Baud rate</label><select name="baud_rate">{% for value in (2400,4800,9600,19200,38400,57600,115200) %}<option value="{{ value }}" {% if (board.baud_rate if board else 9600) == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>
+   <div class="field-group"><label>Data bits</label><select name="data_bits"><option value="8">8</option></select></div>
+   <div class="field-group"><label>Parity</label><select name="parity">{% for value,label in [('NONE','None'),('ODD','Odd'),('EVEN','Even')] %}<option value="{{ value }}" {% if (board.parity if board else 'NONE') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+   <div class="field-group"><label>Stop bits</label><select name="stop_bits">{% for value in (1,2) %}<option value="{{ value }}" {% if (board.stop_bits if board else 1) == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></div>
+   <div class="field-group"><label>Controller address / slave ID</label><input name="slave_id" type="number" min="0" max="255" value="{{ board.slave_id if board else 1 }}"></div>
+   <div class="field-group"><label>Default peripheral preset</label><select name="default_preset_id"><option value="">Safe fallback</option>{% for preset in presets %}<option value="{{ preset.id }}" {% if board and board.default_preset_id == preset.id %}selected{% endif %}>{{ preset.name }}</option>{% endfor %}</select></div>
+  </div>
+  {% if can_manage %}<div class="panel-actions"><button type="submit">Save desired configuration</button></div>{% endif %}
+ </form>
+ {% if board %}
+ <div class="panel-actions">
+  {% if can_manage %}<form method="post" action="/cameras/{{ camera.id }}/control-board/communication/read"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit">Read from Camera</button></form><form method="post" action="/cameras/{{ camera.id }}/control-board/communication/sync" onsubmit="return confirm('Apply the saved Central RS485 settings to this camera? A readback will be requested after acknowledgement.');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit">Sync to Camera</button></form>{% endif %}
+ </div>
+ <h3>Observed camera configuration</h3>
+ <dl class="detail-list"><div><dt>Synchronization</dt><dd><span class="status-badge status-badge--{{ board.communication_sync_status|lower|replace('_','-') }}">{{ board.communication_sync_status|replace('_',' ') }}</span></dd></div><div><dt>Source</dt><dd>{{ board.observed_serial_channel if board.observed_serial_channel is not none else "Not read" }}</dd></div><div><dt>Baud rate</dt><dd>{{ board.observed_baud_rate or "Not read" }}</dd></div><div><dt>Data bits</dt><dd>{{ board.observed_data_bits or "Not read" }}</dd></div><div><dt>Parity</dt><dd>{{ parity_labels.get(board.observed_parity_id, "Not read") }}</dd></div><div><dt>Stop bits</dt><dd>{{ board.observed_stop_bits or "Not read" }}</dd></div><div><dt>Last read</dt><dd>{{ board.last_communication_read_at or "Never" }}</dd></div><div><dt>Controller slave ID</dt><dd>{{ board.slave_id }} (Central/controller frames only; not sent in RA5 UART settings)</dd></div></dl>
+ {% endif %}
+</section>
+{% if board %}
+<section class="ops-panel">
+ <header class="panel-header"><div><p class="panel-kicker">Resolved behavior</p><h2>Current peripheral state</h2></div><span class="status-badge status-badge--{{ resolved.mode|lower }}">{{ resolved.mode }}</span></header>
+ <div class="peripheral-preview">
+  <div class="peripheral-preview__unit">
+   <div class="peripheral-preview__screen" style="--led-opacity: {{ resolved.led_brightness / 5 }}; --led-glow: {{ 0.5 + resolved.led_brightness * 1.1 }}px; --scroll-duration: {{ 12 - resolved.led_scroll_speed * 1.5 }}s" aria-label="Four-row LED display preview"><div class="peripheral-preview__top"><strong class="peripheral-preview__parking">P</strong><div class="peripheral-preview__light peripheral-preview__light--{{ resolved.traffic_state|lower }}" role="img" aria-label="Traffic indicator: {{ resolved.traffic_state }}">{{ resolved.traffic_state }}</div></div>{% for row in resolved.rows %}<span class="peripheral-preview__row">{{ row or "" }}</span>{% endfor %}</div>
+  </div>
+ </div>
+ <p class="panel-note">Preset: {{ resolved.preset_name }}. Camera acknowledgement only confirms that RA5 handled the request; it does not prove the physical LED, speaker, relay, or traffic-light state.</p>
+ {% if can_manage %}<form method="post" action="/cameras/{{ camera.id }}/control-board/apply"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit">Apply resolved preset</button></form>{% endif %}
+ {% if can_test %}<div class="camera-actions">{% for action,label in [('board','Test board'),('led','Test LED'),('red','Test red'),('green','Test green (5 seconds)'),('speaker','Test speaker')] %}<form method="post" action="/cameras/{{ camera.id }}/control-board/test/{{ action }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit">{{ label }}</button></form>{% endfor %}</div>{% endif %}
+</section>
+<section class="ops-panel">
+ <header class="panel-header"><div><p class="panel-kicker">Temporary overrides</p><h2>Scheduled presets</h2></div></header>
+ <div class="table-wrap"><table class="data-table"><thead><tr><th>Preset</th><th>Starts</th><th>Ends</th><th></th></tr></thead><tbody>{% for item in board.schedules %}<tr><td>{{ item.preset.name }}</td><td class="data-text">{{ item.starts_at }}</td><td class="data-text">{{ item.ends_at }}</td><td>{% if can_manage %}<form method="post" action="/cameras/{{ camera.id }}/control-board/schedules/{{ item.id }}/delete"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit">Remove</button></form>{% endif %}</td></tr>{% else %}<tr class="empty-row"><td colspan="4">No scheduled preset overrides.</td></tr>{% endfor %}</tbody></table></div>
+ {% if can_manage %}<form method="post" action="/cameras/{{ camera.id }}/control-board/schedules" class="form-grid"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div class="field-group"><label>Preset</label><select name="preset_id" required>{% for preset in presets %}<option value="{{ preset.id }}">{{ preset.name }}</option>{% endfor %}</select></div><div class="field-group"><label>Starts (site time)</label><input type="datetime-local" name="starts_at" required></div><div class="field-group"><label>Ends (site time)</label><input type="datetime-local" name="ends_at" required></div><div class="panel-actions"><button type="submit">Add schedule</button></div></form>{% endif %}
+</section>
+{% endif %}
+{% endblock %}

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, select, text
@@ -10,6 +11,7 @@ from app.models.camera import Camera
 from app.models.site import Site
 from app.models.user import User
 from app.models.user_session import UserSession
+from app.services.camera_service import connection_state
 
 
 @dataclass(frozen=True)
@@ -22,6 +24,7 @@ class SiteDashboardInfo:
 
 @dataclass(frozen=True)
 class CameraDashboardInfo:
+    id: UUID
     code: str
     name: str
     site_code: str
@@ -29,6 +32,7 @@ class CameraDashboardInfo:
     ip_address: str | None
     is_enabled: bool
     last_seen_display: str | None
+    connection_state: str
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,7 @@ class DashboardSummary:
     active_site_count: int
     camera_count: int
     enabled_camera_count: int
+    online_camera_count: int
     cameras: tuple[CameraDashboardInfo, ...]
     user_count: int
     active_user_count: int
@@ -103,6 +108,11 @@ def get_dashboard_summary(
         .select_from(Camera)
         .where(Camera.is_enabled.is_(True))
     ) or 0
+    online_camera_count = db.scalar(
+        select(func.count())
+        .select_from(Camera)
+        .where(Camera.connection_state == "ONLINE")
+    ) or 0
     user_count = db.scalar(select(func.count()).select_from(User)) or 0
     active_user_count = db.scalar(
         select(func.count())
@@ -128,6 +138,7 @@ def get_dashboard_summary(
     ).all()
     cameras = tuple(
         CameraDashboardInfo(
+            id=camera.id,
             code=camera.code,
             name=camera.name,
             site_code=site_code,
@@ -135,6 +146,7 @@ def get_dashboard_summary(
             ip_address=camera.ip_address,
             is_enabled=camera.is_enabled,
             last_seen_display=_display_time(camera.last_seen_at, site_timezone),
+            connection_state=connection_state(camera),
         )
         for camera, site_code, site_timezone in camera_rows
     )
@@ -159,6 +171,7 @@ def get_dashboard_summary(
         active_site_count=active_site_count,
         camera_count=camera_count,
         enabled_camera_count=enabled_camera_count,
+        online_camera_count=online_camera_count,
         cameras=cameras,
         user_count=user_count,
         active_user_count=active_user_count,

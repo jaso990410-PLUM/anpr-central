@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
 import logging
@@ -10,18 +11,39 @@ from typing import Any
 from uuid import UUID
 
 import paho.mqtt.client as mqtt
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import SessionLocal
-from app.models.camera import Camera
-from app.services.camera_service import (
-    CREDENTIALS_REVOKED,
-    OFFLINE,
-    ONLINE,
-    PROVISIONED,
+from app.integrations.visionzenith.adapter import (
+    NativeMessageRejected,
+    VisionZenithAdapter,
 )
+from app.integrations.visionzenith.command_manager import (
+    VisionZenithCommandManager,
+)
+from app.integrations.visionzenith.protocol import led_frame
+from app.integrations.visionzenith.topics import (
+    QUICK_RECOGNITION,
+    RECOGNITION,
+    KEEP_ALIVE,
+    SUBSCRIPTIONS,
+    parse_native_topic,
+)
+from app.models.camera import Camera
+from app.services.mqtt_config_service import (
+    EffectiveMqttConfig,
+    environment_mqtt_config,
+)
+from app.services.recognition_ingestion_service import RecognitionWorker
+from app.services.access_list_sync_service import AccessListSyncCoordinator
+from app.services.camera_presence_service import (
+    mark_camera_online,
+    mark_timed_out_cameras,
+)
+from app.services.camera_service import CREDENTIALS_REVOKED
+from app.services.control_board_runtime_service import PeripheralRuntimeCoordinator
 
 
 logger = logging.getLogger(__name__)
@@ -39,6 +61,17 @@ class HeartbeatMessage:
     state: str
     reported_at: datetime
     agent_version: str | None
+
+
+@dataclass(frozen=True)
+class MqttRuntimeStatus:
+    is_connected: bool
+    is_enabled: bool
+    host: str
+    port: int
+    client_id: str
+    last_connected_at: datetime | None
+    last_error: str | None
 
 
 def parse_heartbeat(topic: str, payload: bytes) -> HeartbeatMessage:
@@ -114,41 +147,12 @@ def process_heartbeat(
     if camera.provisioning_state == CREDENTIALS_REVOKED:
         raise HeartbeatRejected("Camera provisioning is revoked")
 
-    received_at = _as_utc(now) if now is not None else datetime.now(timezone.utc)
-    was_online = camera.connection_state == ONLINE
-    camera.connection_state = ONLINE
-    camera.last_seen_at = received_at
-    if not was_online:
-        camera.last_connected_at = received_at
-    if message.agent_version is not None:
-        camera.agent_version = message.agent_version
-    camera.provisioning_state = PROVISIONED
-    db.flush()
-    return camera
-
-
-def mark_timed_out_cameras(
-    db: Session,
-    *,
-    now: datetime | None = None,
-    timeout_seconds: int | None = None,
-) -> int:
-    checked_at = _as_utc(now) if now is not None else datetime.now(timezone.utc)
-    timeout = timeout_seconds or settings.mqtt_heartbeat_timeout_seconds
-    cutoff = checked_at - timedelta(seconds=timeout)
-    cameras = db.scalars(
-        select(Camera).where(
-            Camera.connection_state == ONLINE,
-            Camera.is_enabled.is_(True),
-            Camera.provisioning_state != CREDENTIALS_REVOKED,
-            or_(Camera.last_seen_at.is_(None), Camera.last_seen_at <= cutoff),
-        )
-    ).all()
-    for camera in cameras:
-        camera.connection_state = OFFLINE
-    if cameras:
-        db.flush()
-    return len(cameras)
+    return mark_camera_online(
+        db,
+        camera,
+        now=now,
+        agent_version=message.agent_version,
+    )
 
 
 class MqttHeartbeatService:
@@ -164,25 +168,38 @@ class MqttHeartbeatService:
         heartbeat_timeout_seconds: int | None = None,
     ):
         self._session_factory = session_factory
-        self._client_factory = client_factory or self._build_client
-        self._host = host or settings.mqtt_host
-        self._port = port or settings.mqtt_port
-        self._heartbeat_timeout_seconds = (
-            heartbeat_timeout_seconds or settings.mqtt_heartbeat_timeout_seconds
+        self._client_factory = client_factory
+        configuration = environment_mqtt_config()
+        self._configuration = replace(
+            configuration,
+            host=host or configuration.host,
+            port=port or configuration.port,
+            heartbeat_timeout_seconds=(
+                heartbeat_timeout_seconds
+                or configuration.heartbeat_timeout_seconds
+            ),
         )
-        self._queue: Queue[tuple[str, bytes]] = Queue(maxsize=1000)
+        self._queue: Queue[tuple[str, bytes, bool]] = Queue(maxsize=1000)
         self._connected = Event()
         self._stop_event = Event()
         self._lifecycle_lock = Lock()
         self._client: mqtt.Client | None = None
         self._worker: Thread | None = None
+        self._command_manager: VisionZenithCommandManager | None = None
+        self._recognition_worker: RecognitionWorker | None = None
+        self._access_sync: AccessListSyncCoordinator | None = None
+        self._control_board_runtime: PeripheralRuntimeCoordinator | None = None
+        self._visionzenith = VisionZenithAdapter(
+            auto_led_enabled=settings.visionzenith_auto_led_enabled
+        )
         self._running = False
+        self._last_connected_at: datetime | None = None
+        self._last_error: str | None = None
 
-    @staticmethod
-    def _build_client() -> mqtt.Client:
+    def _build_client(self) -> mqtt.Client:
         return mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-            client_id="anpr-central",
+            client_id=self._configuration.client_id,
             protocol=mqtt.MQTTv311,
         )
 
@@ -194,13 +211,111 @@ class MqttHeartbeatService:
     def status_label(self) -> str:
         return "CONNECTED" if self.is_connected else "DISCONNECTED"
 
-    def start(self) -> None:
+    @property
+    def is_running(self) -> bool:
+        return self._running
+
+    def runtime_status(self) -> MqttRuntimeStatus:
+        with self._lifecycle_lock:
+            return MqttRuntimeStatus(
+                is_connected=self.is_connected,
+                is_enabled=self._configuration.is_enabled,
+                host=self._configuration.host,
+                port=self._configuration.port,
+                client_id=self._configuration.client_id,
+                last_connected_at=self._last_connected_at,
+                last_error=self._last_error,
+            )
+
+    def enqueue_led_test(self, camera: Camera) -> None:
+        if not self.is_connected or self._command_manager is None:
+            raise RuntimeError("MQTT broker is not connected")
+        if not camera.serial_number:
+            raise RuntimeError("Camera serial number is required")
+        if not camera.is_enabled:
+            raise RuntimeError("Camera is disabled")
+        if camera.provisioning_state == CREDENTIALS_REVOKED:
+            raise RuntimeError("Camera provisioning is revoked")
+        self._command_manager.enqueue_serial(
+            camera_id=camera.id,
+            serial_number=camera.serial_number,
+            command_type="display_plate",
+            raw_frame=led_frame("ANPR"),
+            request_metadata={"diagnostic": True, "text": "ANPR"},
+        )
+
+    def enqueue_access_entry(self, entry_id: UUID, *, verify_only: bool = False) -> int:
+        if self._access_sync is None:
+            return 0
+        return self._access_sync.enqueue_entry(entry_id, verify_only=verify_only)
+
+    def delete_camera_access_record(self, entry_id: UUID, camera_id: UUID):
+        if self._access_sync is None:
+            raise RuntimeError("Access-list synchronization is unavailable")
+        return self._access_sync.delete_camera_access_record(entry_id, camera_id)
+
+    def delete_all_camera_access_records(self, camera_id: UUID):
+        if self._access_sync is None:
+            raise RuntimeError("Access-list synchronization is unavailable")
+        return self._access_sync.delete_all_camera_access_records(camera_id)
+
+    def test_control_board(self, board_id: UUID, action: str) -> int:
+        if self._control_board_runtime is None:
+            raise RuntimeError("Control-board runtime is unavailable")
+        return self._control_board_runtime.test(board_id, action)
+
+    def preview_control_board(self, board_id: UUID, rows: tuple[str, str, str, str]) -> int:
+        if self._control_board_runtime is None:
+            raise RuntimeError("Control-board runtime is unavailable")
+        return self._control_board_runtime.send_preview_led(board_id, rows)
+
+    def apply_control_board(self, camera_id: UUID) -> None:
+        if self._control_board_runtime is None:
+            raise RuntimeError("Control-board runtime is unavailable")
+        self._control_board_runtime.restore_camera(camera_id, force=True)
+
+    def read_control_board_rs485(self, board_id: UUID) -> UUID:
+        if self._control_board_runtime is None:
+            raise RuntimeError("Control-board runtime is unavailable")
+        return self._control_board_runtime.read_rs485(board_id)
+
+    def sync_control_board_rs485(self, board_id: UUID) -> UUID:
+        if self._control_board_runtime is None:
+            raise RuntimeError("Control-board runtime is unavailable")
+        return self._control_board_runtime.sync_rs485(board_id)
+
+    def start(self, configuration: EffectiveMqttConfig | None = None) -> None:
         with self._lifecycle_lock:
             if self._running:
                 return
+            if configuration is not None:
+                self._configuration = configuration
             self._running = True
             self._stop_event.clear()
             self._connected.clear()
+            self._command_manager = VisionZenithCommandManager(
+                session_factory=self._session_factory,
+                publisher=self._publish,
+                timeout_seconds=settings.visionzenith_command_timeout_seconds,
+            )
+            self._control_board_runtime = PeripheralRuntimeCoordinator(
+                session_factory=self._session_factory,
+                command_manager=self._command_manager,
+                is_connected=lambda: self.is_connected,
+            )
+            self._control_board_runtime.start()
+            self._recognition_worker = RecognitionWorker(
+                session_factory=self._session_factory,
+                command_manager=self._command_manager,
+                peripheral_event_callback=self._control_board_runtime.handle_recognition,
+            )
+            self._recognition_worker.start()
+            self._access_sync = AccessListSyncCoordinator(
+                session_factory=self._session_factory,
+                command_manager=self._command_manager,
+                is_connected=lambda: self.is_connected,
+            )
+            self._access_sync.start()
             self._worker = Thread(
                 target=self._worker_loop,
                 name="anpr-mqtt-heartbeats",
@@ -208,17 +323,43 @@ class MqttHeartbeatService:
             )
             self._worker.start()
 
-            client = self._client_factory()
+            client = (
+                self._client_factory()
+                if self._client_factory is not None
+                else self._build_client()
+            )
             self._client = client
             client.on_connect = self._on_connect
+            client.on_connect_fail = self._on_connect_fail
             client.on_disconnect = self._on_disconnect
             client.on_message = self._on_message
             client.reconnect_delay_set(min_delay=1, max_delay=30)
+            if self._configuration.username:
+                password = (
+                    self._configuration.password.get_secret_value()
+                    if self._configuration.password is not None
+                    else None
+                )
+                client.username_pw_set(self._configuration.username, password)
             try:
-                client.connect_async(self._host, self._port, keepalive=60)
+                client.connect_async(
+                    self._configuration.host,
+                    self._configuration.port,
+                    keepalive=60,
+                )
                 client.loop_start()
             except Exception:
+                self._last_error = "Broker connection failed"
                 logger.exception("Unable to start MQTT network loop")
+
+    def reconfigure(self, configuration: EffectiveMqttConfig) -> None:
+        """Apply one configuration using the existing service lifecycle."""
+        self.stop()
+        with self._lifecycle_lock:
+            self._configuration = configuration
+            self._last_error = None
+        if configuration.is_enabled:
+            self.start()
 
     def stop(self) -> None:
         with self._lifecycle_lock:
@@ -238,8 +379,20 @@ class MqttHeartbeatService:
             worker = self._worker
             if worker is not None:
                 worker.join(timeout=5)
+            if self._command_manager is not None:
+                if self._access_sync is not None:
+                    self._access_sync.stop()
+                if self._recognition_worker is not None:
+                    self._recognition_worker.stop()
+                if self._control_board_runtime is not None:
+                    self._control_board_runtime.stop()
+                self._command_manager.stop()
             self._connected.clear()
             self._worker = None
+            self._command_manager = None
+            self._recognition_worker = None
+            self._access_sync = None
+            self._control_board_runtime = None
             self._client = None
             self._running = False
 
@@ -253,10 +406,14 @@ class MqttHeartbeatService:
     ) -> None:
         if reason_code == 0:
             self._connected.set()
-            client.subscribe(STATUS_TOPIC, qos=1)
-            logger.info("MQTT connected and subscribed to %s", STATUS_TOPIC)
+            self._last_connected_at = datetime.now(timezone.utc)
+            self._last_error = None
+            for topic, qos in ((STATUS_TOPIC, 1), *SUBSCRIPTIONS):
+                client.subscribe(topic, qos=qos)
+            logger.info("MQTT connected and subscribed to central camera topics")
         else:
             self._connected.clear()
+            self._last_error = _connection_error(reason_code)
             logger.warning("MQTT connection rejected: %s", reason_code)
 
     def _on_disconnect(
@@ -269,10 +426,21 @@ class MqttHeartbeatService:
     ) -> None:
         self._connected.clear()
         if not self._stop_event.is_set():
+            self._last_error = "Broker disconnected"
             logger.warning(
                 "MQTT disconnected (%s); Paho will reconnect automatically",
                 reason_code,
             )
+
+    def _on_connect_fail(
+        self,
+        _client: mqtt.Client,
+        _userdata: Any,
+    ) -> None:
+        self._connected.clear()
+        self._last_error = "Broker is unreachable"
+        if not self._stop_event.is_set():
+            logger.warning("MQTT broker connection attempt failed")
 
     def _on_message(
         self,
@@ -281,37 +449,88 @@ class MqttHeartbeatService:
         message: Any,
     ) -> None:
         try:
-            self._queue.put_nowait((str(message.topic), bytes(message.payload)))
+            self._queue.put_nowait(
+                (
+                    str(message.topic),
+                    bytes(message.payload),
+                    bool(message.retain),
+                )
+            )
         except Full:
             logger.warning("MQTT heartbeat queue is full; message rejected")
 
     def _worker_loop(self) -> None:
         sweep_interval = max(
             1.0,
-            min(15.0, self._heartbeat_timeout_seconds / 3),
+            min(15.0, self._configuration.heartbeat_timeout_seconds / 3),
         )
         next_sweep = time.monotonic() + sweep_interval
         while not self._stop_event.is_set():
             wait_seconds = max(0.1, min(1.0, next_sweep - time.monotonic()))
             try:
-                topic, payload = self._queue.get(timeout=wait_seconds)
+                topic, payload, retained = self._queue.get(timeout=wait_seconds)
             except Empty:
                 pass
             else:
-                self._process_queued_heartbeat(topic, payload)
+                self._process_queued_message(topic, payload, retained=retained)
 
             if time.monotonic() >= next_sweep:
                 self._mark_timeouts()
                 next_sweep = time.monotonic() + sweep_interval
 
-    def _process_queued_heartbeat(self, topic: str, payload: bytes) -> None:
+    def _process_queued_message(
+        self, topic: str, payload: bytes, *, retained: bool = False
+    ) -> None:
+        native_topic = parse_native_topic(topic)
+        if native_topic is not None and native_topic.message_type in {
+            QUICK_RECOGNITION,
+            RECOGNITION,
+        }:
+            worker = self._recognition_worker
+            if worker is None:
+                logger.warning("Recognition worker unavailable; event dropped")
+                return
+            worker.enqueue(
+                native_topic.serial_number,
+                native_topic.message_type,
+                payload,
+                retained=retained,
+            )
+            return
         with self._session_factory() as db:
             try:
-                process_heartbeat(db, topic, payload)
+                if topic.startswith("anpr/"):
+                    camera = process_heartbeat(db, topic, payload)
+                    db.commit()
+                    if self._access_sync is not None:
+                        self._access_sync.enqueue_pending_for_camera(camera.id)
+                    if self._control_board_runtime is not None:
+                        self._control_board_runtime.restore_camera(camera.id)
+                    return
+                else:
+                    if self._command_manager is None:
+                        raise NativeMessageRejected("Command manager is unavailable")
+                    dispatched = self._visionzenith.dispatch(
+                        db,
+                        topic,
+                        payload,
+                        retained=retained,
+                        command_manager=self._command_manager,
+                    )
                 db.commit()
-            except HeartbeatRejected as error:
+                if dispatched == KEEP_ALIVE and self._access_sync is not None:
+                    camera = db.scalar(
+                        select(Camera).where(
+                            Camera.serial_number == native_topic.serial_number
+                        )
+                    )
+                    if camera is not None:
+                        self._access_sync.enqueue_pending_for_camera(camera.id)
+                        if self._control_board_runtime is not None:
+                            self._control_board_runtime.restore_camera(camera.id)
+            except (HeartbeatRejected, NativeMessageRejected) as error:
                 db.rollback()
-                logger.warning("MQTT heartbeat rejected for %s: %s", topic, error)
+                logger.warning("MQTT message rejected for %s: %s", topic, error)
             except Exception:
                 db.rollback()
                 logger.exception("Unexpected MQTT heartbeat processing failure")
@@ -321,19 +540,29 @@ class MqttHeartbeatService:
             try:
                 changed = mark_timed_out_cameras(
                     db,
-                    timeout_seconds=self._heartbeat_timeout_seconds,
+                    timeout_seconds=self._configuration.heartbeat_timeout_seconds,
                 )
                 if changed:
                     db.commit()
+                if self._command_manager is not None:
+                    self._command_manager.mark_orphaned_commands()
             except Exception:
                 db.rollback()
                 logger.exception("Unexpected MQTT heartbeat timeout failure")
 
+    def _publish(self, topic: str, payload: str, qos: int) -> bool:
+        client = self._client
+        if client is None or not self.is_connected:
+            return False
+        result = client.publish(topic, payload, qos=qos, retain=False)
+        return result.rc == mqtt.MQTT_ERR_SUCCESS
 
-def _as_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+
+def _connection_error(reason_code: Any) -> str:
+    text = str(reason_code).lower()
+    if "author" in text or "credential" in text or "password" in text:
+        return "Authentication failed"
+    return "Broker connection rejected"
 
 
 mqtt_heartbeat_service = MqttHeartbeatService()

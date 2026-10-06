@@ -75,12 +75,12 @@
 
         <label class="account-state-option">
             <input type="checkbox" name="is_enabled" value="true" {% if values.is_enabled %}checked{% endif %}>
-            <span><strong>Camera enabled</strong><small>Enabled cameras remain UNPROVISIONED until an RA5 agent is configured.</small></span>
+            <span><strong>Camera enabled</strong><small>Enabled cameras remain UNPROVISIONED until a valid native MQTT heartbeat is accepted.</small></span>
         </label>
 
         <div class="provisioning-note">
             <strong>Connection ownership</strong>
-            <p>The RA5 central agent will initiate its future MQTT connection to Mosquitto. ANPR Central records and displays state; it does not directly connect to the camera.</p>
+            <p>The RA5 camera initiates its native MQTT connection to Mosquitto. ANPR Central records and displays state; it does not directly connect to the camera.</p>
         </div>
 
         <div class="form-actions">
