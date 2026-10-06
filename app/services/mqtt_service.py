@@ -25,6 +25,9 @@ from app.integrations.visionzenith.command_manager import (
 )
 from app.integrations.visionzenith.protocol import led_frame
 from app.integrations.visionzenith.topics import (
+    OFFLINE_COUNT,
+    OFFLINE_RECOGNITION,
+    OFFLINE_RECOVERY_REPLY,
     QUICK_RECOGNITION,
     RECOGNITION,
     KEEP_ALIVE,
@@ -37,6 +40,10 @@ from app.services.mqtt_config_service import (
     environment_mqtt_config,
 )
 from app.services.recognition_ingestion_service import RecognitionWorker
+from app.services.offline_recovery_service import (
+    OfflineRecoveryCoordinator,
+    OfflineRecoveryRejected,
+)
 from app.services.access_list_sync_service import AccessListSyncCoordinator
 from app.services.camera_presence_service import (
     mark_camera_online,
@@ -187,6 +194,7 @@ class MqttHeartbeatService:
         self._worker: Thread | None = None
         self._command_manager: VisionZenithCommandManager | None = None
         self._recognition_worker: RecognitionWorker | None = None
+        self._offline_recovery: OfflineRecoveryCoordinator | None = None
         self._access_sync: AccessListSyncCoordinator | None = None
         self._control_board_runtime: PeripheralRuntimeCoordinator | None = None
         self._visionzenith = VisionZenithAdapter(
@@ -284,6 +292,11 @@ class MqttHeartbeatService:
             raise RuntimeError("Control-board runtime is unavailable")
         return self._control_board_runtime.sync_rs485(board_id)
 
+    def recover_offline_events(self, camera_id: UUID):
+        if self._offline_recovery is None:
+            raise RuntimeError("Offline recognition recovery is unavailable")
+        return self._offline_recovery.manual_recover(camera_id)
+
     def start(self, configuration: EffectiveMqttConfig | None = None) -> None:
         with self._lifecycle_lock:
             if self._running:
@@ -304,10 +317,16 @@ class MqttHeartbeatService:
                 is_connected=lambda: self.is_connected,
             )
             self._control_board_runtime.start()
+            self._offline_recovery = OfflineRecoveryCoordinator(
+                session_factory=self._session_factory,
+                command_manager=self._command_manager,
+                is_connected=lambda: self.is_connected,
+            )
             self._recognition_worker = RecognitionWorker(
                 session_factory=self._session_factory,
                 command_manager=self._command_manager,
                 peripheral_event_callback=self._control_board_runtime.handle_recognition,
+                recovery_result_callback=self._offline_recovery.record_message,
             )
             self._recognition_worker.start()
             self._access_sync = AccessListSyncCoordinator(
@@ -391,6 +410,7 @@ class MqttHeartbeatService:
             self._worker = None
             self._command_manager = None
             self._recognition_worker = None
+            self._offline_recovery = None
             self._access_sync = None
             self._control_board_runtime = None
             self._client = None
@@ -485,17 +505,40 @@ class MqttHeartbeatService:
         if native_topic is not None and native_topic.message_type in {
             QUICK_RECOGNITION,
             RECOGNITION,
+            OFFLINE_RECOGNITION,
         }:
             worker = self._recognition_worker
             if worker is None:
                 logger.warning("Recognition worker unavailable; event dropped")
                 return
-            worker.enqueue(
+            accepted = worker.enqueue(
                 native_topic.serial_number,
                 native_topic.message_type,
                 payload,
                 retained=retained,
             )
+            if (
+                not accepted
+                and native_topic.message_type == OFFLINE_RECOGNITION
+                and self._offline_recovery is not None
+            ):
+                self._offline_recovery.record_message(
+                    native_topic.serial_number, False, False
+                )
+            return
+        if native_topic is not None and native_topic.message_type == OFFLINE_COUNT:
+            coordinator = self._offline_recovery
+            if coordinator is None:
+                logger.warning("Offline recovery coordinator unavailable")
+                return
+            try:
+                if self._recognition_worker is not None:
+                    self._recognition_worker.drain()
+                coordinator.handle_count(
+                    native_topic.serial_number, payload, retained=retained
+                )
+            except OfflineRecoveryRejected as error:
+                logger.warning("Offline count rejected for %s: %s", topic, error)
             return
         with self._session_factory() as db:
             try:
@@ -518,6 +561,14 @@ class MqttHeartbeatService:
                         command_manager=self._command_manager,
                     )
                 db.commit()
+                if (
+                    dispatched == OFFLINE_RECOVERY_REPLY
+                    and self._offline_recovery is not None
+                    and native_topic is not None
+                ):
+                    self._offline_recovery.handle_ack(
+                        native_topic.serial_number, payload
+                    )
                 if dispatched == KEEP_ALIVE and self._access_sync is not None:
                     camera = db.scalar(
                         select(Camera).where(
@@ -528,7 +579,11 @@ class MqttHeartbeatService:
                         self._access_sync.enqueue_pending_for_camera(camera.id)
                         if self._control_board_runtime is not None:
                             self._control_board_runtime.restore_camera(camera.id)
-            except (HeartbeatRejected, NativeMessageRejected) as error:
+            except (
+                HeartbeatRejected,
+                NativeMessageRejected,
+                OfflineRecoveryRejected,
+            ) as error:
                 db.rollback()
                 logger.warning("MQTT message rejected for %s: %s", topic, error)
             except Exception:
@@ -546,6 +601,9 @@ class MqttHeartbeatService:
                     db.commit()
                 if self._command_manager is not None:
                     self._command_manager.mark_orphaned_commands()
+                if self._offline_recovery is not None:
+                    self._offline_recovery.mark_camera_offline_runs()
+                    self._offline_recovery.mark_timeouts()
             except Exception:
                 db.rollback()
                 logger.exception("Unexpected MQTT heartbeat timeout failure")

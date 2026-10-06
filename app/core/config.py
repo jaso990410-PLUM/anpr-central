@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     recognition_max_image_bytes: int = Field(
         default=8 * 1024 * 1024, ge=1024, le=32 * 1024 * 1024
     )
+    offline_recovery_batch_size: int = Field(default=100, ge=1, le=1000)
+    offline_recovery_timeout_seconds: int = Field(default=60, ge=10, le=900)
     live_poll_seconds: int = Field(default=5, ge=3, le=30)
 
     default_site_code: str = "MAIN"

@@ -12,6 +12,7 @@ from app.models.control_board import (
     PeripheralPresetSchedule,
 )
 from app.models.mqtt_broker_config import MqttBrokerConfig
+from app.models.offline_recovery_run import OfflineRecoveryRun
 from app.models.recognition_event import RecognitionEvent
 from app.models.permission import Permission
 from app.models.role import Role
@@ -28,6 +29,7 @@ __all__ = [
     "CameraCommand",
     "ControlBoard",
     "MqttBrokerConfig",
+    "OfflineRecoveryRun",
     "RecognitionEvent",
     "Permission",
     "PeripheralBehavior",

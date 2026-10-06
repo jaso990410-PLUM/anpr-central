@@ -7,6 +7,9 @@ RECOGNITION = "ivs_result"
 SERIAL_REPLY = "serial_data_reply"
 ACCESS_LIST_REPLY = "white_list_operator_reply"
 DEVICE_SET_REPLY = "device_set_reply"
+OFFLINE_COUNT = "offline_record"
+OFFLINE_RECOGNITION = "ivs_result_offline"
+OFFLINE_RECOVERY_REPLY = "check_offline_record_reply"
 
 SUBSCRIPTIONS = (
     ("device/+/message/up/keep_alive", 1),
@@ -15,6 +18,9 @@ SUBSCRIPTIONS = (
     ("device/+/message/down/serial_data/reply", 1),
     ("device/+/message/down/white_list_operator/reply", 1),
     ("device/+/message/down/device_set/reply", 1),
+    ("device/+/message/up/offline_record", 1),
+    ("device/+/message/up/ivs_result_offline", 1),
+    ("device/+/message/down/check_offline_record/reply", 1),
 )
 
 
@@ -37,6 +43,7 @@ def parse_native_topic(topic: str) -> NativeTopic | None:
                 "serial_data": SERIAL_REPLY,
                 "white_list_operator": ACCESS_LIST_REPLY,
                 "device_set": DEVICE_SET_REPLY,
+                "check_offline_record": OFFLINE_RECOVERY_REPLY,
             }.get(parts[4])
             if message_type and parts[1]:
                 return NativeTopic(parts[1], message_type)
@@ -47,6 +54,8 @@ def parse_native_topic(topic: str) -> NativeTopic | None:
         "keep_alive": KEEP_ALIVE,
         "quick_ivs_result": QUICK_RECOGNITION,
         "ivs_result": RECOGNITION,
+        "offline_record": OFFLINE_COUNT,
+        "ivs_result_offline": OFFLINE_RECOGNITION,
     }.get(parts[4])
     return NativeTopic(parts[1], message_type) if message_type else None
 
@@ -61,3 +70,7 @@ def access_list_topic(serial_number: str) -> str:
 
 def device_set_topic(serial_number: str) -> str:
     return f"device/{serial_number}/message/down/device_set"
+
+
+def offline_recovery_topic(serial_number: str) -> str:
+    return f"device/{serial_number}/message/down/check_offline_record"

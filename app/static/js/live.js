@@ -71,6 +71,7 @@
         if (field === "plate") node.className = "plate-value";
         if (field === "direction") node.className = `status-badge status-badge--${value.toLowerCase()}`;
         if (field === "status") node.className = `status-badge status-badge--${value === "Complete" ? "online" : "warning"}`;
+        if (field === "source") node.className = `status-badge status-badge--${value === "Live" ? "online" : "neutral"}`;
         cell.append(node);
         return cell;
     };
@@ -140,6 +141,7 @@
             row.append(
                 textCell("plate", event.plate), textCell("camera", event.camera),
                 textCell("site", event.site), textCell("direction", event.direction),
+                textCell("source", event.source_label),
                 accessCell(event),
                 textCell("confidence", event.confidence_display, "data-text"),
                 textCell("time", event.captured_display, "data-text"),
@@ -147,14 +149,16 @@
             );
             body.prepend(row);
         }
-        ["plate", "camera", "site", "direction", "confidence", "time", "status"].forEach((field) => {
+        ["plate", "camera", "site", "direction", "source", "confidence", "time", "status"].forEach((field) => {
             const node = row.querySelector(`[data-field="${field}"]`);
-            if (node) node.textContent = field === "time" ? event.captured_display : field === "confidence" ? event.confidence_display : event[field];
+            if (node) node.textContent = field === "time" ? event.captured_display : field === "confidence" ? event.confidence_display : field === "source" ? event.source_label : event[field];
         });
         const direction = row.querySelector('[data-field="direction"]');
         if (direction) direction.className = `status-badge status-badge--${event.direction_code.toLowerCase()}`;
         const status = row.querySelector('[data-field="status"]');
         if (status) status.className = `status-badge status-badge--${event.status === "Complete" ? "online" : "warning"}`;
+        const source = row.querySelector('[data-field="source"]');
+        if (source) source.className = `status-badge status-badge--${event.source === "LIVE" ? "online" : "neutral"}`;
         const access = row.querySelector('[data-field="access"]');
         if (access) renderAccess(access, event);
         const imageCell = row.querySelector('[data-field="images"]')?.closest("td") || row.lastElementChild;
@@ -189,7 +193,11 @@
         recognitionBusy = true;
         try {
             const cursor = recognitionRoot.dataset.cursor;
-            const url = cursor ? `/api/recognitions/live?after=${encodeURIComponent(cursor)}` : "/api/recognitions/live";
+            const parameters = new URLSearchParams();
+            if (cursor) parameters.set("after", cursor);
+            if (recognitionRoot.dataset.source) parameters.set("source", recognitionRoot.dataset.source);
+            const query = parameters.toString();
+            const url = `/api/recognitions/live${query ? `?${query}` : ""}`;
             const response = await fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } });
             if (!response.ok) throw new Error("recognition request failed");
             const payload = await response.json();

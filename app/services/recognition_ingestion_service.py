@@ -18,7 +18,7 @@ from app.integrations.visionzenith.recognition import (
     image_candidates,
     parse_recognition,
 )
-from app.integrations.visionzenith.topics import QUICK_RECOGNITION, RECOGNITION
+from app.integrations.visionzenith.topics import OFFLINE_RECOGNITION, QUICK_RECOGNITION, RECOGNITION
 from app.models.camera import Camera
 from app.models.control_board import ControlBoard
 from app.models.recognition_event import RecognitionEvent
@@ -56,7 +56,7 @@ class RecognitionIngestionService:
         retained: bool,
         received_at: datetime | None = None,
     ) -> tuple[RecognitionEvent, bool, bool]:
-        if message_type not in {QUICK_RECOGNITION, RECOGNITION}:
+        if message_type not in {QUICK_RECOGNITION, RECOGNITION, OFFLINE_RECOGNITION}:
             raise RecognitionIngestionRejected("Unsupported recognition message type")
         camera = self.db.scalar(
             select(Camera).where(Camera.serial_number == serial_number)
@@ -72,6 +72,7 @@ class RecognitionIngestionService:
         except RecognitionRejected as error:
             raise RecognitionIngestionRejected(str(error)) from error
         received = _as_utc(received_at or datetime.now(timezone.utc))
+        historical = message_type == OFFLINE_RECOGNITION
         # PlateResult.direction is vendor motion (unknown/left/right/up/down),
         # not the operational lane direction. Entry/exit belongs to the camera.
         direction = _configured_direction(camera.direction)
@@ -80,6 +81,7 @@ class RecognitionIngestionService:
             parsed=parsed,
             direction=direction,
             received_at=received,
+            historical=historical,
         )
         created = event is None
         if event is None:
@@ -87,28 +89,33 @@ class RecognitionIngestionService:
                 camera_id=camera.id,
                 site_id=camera.site_id,
                 vendor_event_id=parsed.event_id,
+                vendor_record_id=parsed.record_id,
                 plate_text=parsed.plate,
                 direction=direction,
                 confidence=parsed.confidence,
                 captured_at=parsed.captured_at,
                 received_at=received,
-                event_type=(
-                    "QUICK" if message_type == QUICK_RECOGNITION else "FULL"
-                ),
+                event_type=("QUICK" if message_type == QUICK_RECOGNITION else "FULL"),
+                source="OFFLINE_RECOVERY" if historical else "LIVE",
+                recovered_at=received if historical else None,
                 event_metadata=parsed.metadata or None,
             )
             self.db.add(event)
             self.db.flush()
-        elif message_type == RECOGNITION:
+        elif message_type in {RECOGNITION, OFFLINE_RECOGNITION}:
             event.event_type = "ENRICHED"
             if parsed.confidence is not None:
                 event.confidence = parsed.confidence
             event.captured_at = parsed.captured_at or event.captured_at
             event.direction = direction or event.direction
+            event.vendor_record_id = event.vendor_record_id or parsed.record_id
             event.event_metadata = {
                 **(event.event_metadata or {}),
                 **parsed.metadata,
             } or None
+            if historical:
+                event.recovered_at = received
+                event.event_metadata = {**(event.event_metadata or {}), "offline_recovery_duplicate": True}
 
         self._store_images(event, parsed)
         self.db.flush()
@@ -128,6 +135,7 @@ class RecognitionIngestionService:
         parsed: RecognitionMessage,
         direction: str | None,
         received_at: datetime,
+        historical: bool,
     ) -> RecognitionEvent | None:
         cutoff = received_at - timedelta(
             seconds=settings.recognition_correlation_seconds
@@ -146,18 +154,17 @@ class RecognitionIngestionService:
                 .limit(2)
             ).all()
             if len(matches) == 1:
-                candidate = matches[0]
-                same_capture = (
-                    parsed.captured_at is not None
-                    and candidate.captured_at is not None
-                    and _as_utc(parsed.captured_at)
-                    == _as_utc(candidate.captured_at)
-                )
-                recent = cutoff <= _as_utc(candidate.received_at) <= (
-                    received_at + timedelta(seconds=1)
-                )
-                if same_capture or recent:
-                    return candidate
+                return matches[0]
+            if len(matches) > 1:
+                return None
+        if parsed.record_id:
+            matches = self.db.scalars(
+                select(RecognitionEvent).where(
+                    *common, RecognitionEvent.vendor_record_id == parsed.record_id
+                ).limit(2)
+            ).all()
+            if len(matches) == 1:
+                return matches[0]
             if len(matches) > 1:
                 return None
         direction_clause = (
@@ -165,14 +172,23 @@ class RecognitionIngestionService:
             if direction is None
             else RecognitionEvent.direction == direction
         )
-        matches = self.db.scalars(
-            select(RecognitionEvent).where(
+        if historical and parsed.captured_at is not None:
+            capture = _as_utc(parsed.captured_at)
+            matches = self.db.scalars(select(RecognitionEvent).where(
+                *common,
+                RecognitionEvent.captured_at >= capture - timedelta(seconds=settings.recognition_correlation_seconds),
+                RecognitionEvent.captured_at <= capture + timedelta(seconds=settings.recognition_correlation_seconds),
+                direction_clause,
+            )).all()
+        elif not historical:
+            matches = self.db.scalars(select(RecognitionEvent).where(
                 *common,
                 RecognitionEvent.received_at >= cutoff,
                 RecognitionEvent.received_at <= received_at + timedelta(seconds=1),
                 direction_clause,
-            )
-        ).all()
+            )).all()
+        else:
+            matches = []
         return matches[0] if len(matches) == 1 else None
 
     def _store_images(
@@ -213,11 +229,13 @@ class RecognitionWorker:
         session_factory: Callable[[], Session],
         command_manager: VisionZenithCommandManager,
         peripheral_event_callback: Callable[[UUID, str], None] | None = None,
+        recovery_result_callback: Callable[[str, bool, bool], None] | None = None,
         queue_size: int = RECOGNITION_QUEUE_SIZE,
     ) -> None:
         self._session_factory = session_factory
         self._command_manager = command_manager
         self._peripheral_event_callback = peripheral_event_callback
+        self._recovery_result_callback = recovery_result_callback
         self._queue: Queue[RecognitionTask] = Queue(maxsize=queue_size)
         self._stop = Event()
         self._thread: Thread | None = None
@@ -265,6 +283,10 @@ class RecognitionWorker:
             self._thread.join(timeout=5)
         self._thread = None
 
+    def drain(self) -> None:
+        """Wait until events already handed to the ingestion worker are durable."""
+        self._queue.join()
+
     def _run(self) -> None:
         while not self._stop.is_set():
             try:
@@ -296,6 +318,8 @@ class RecognitionWorker:
                             board.slave_id if board else 1,
                         )
                         db.commit()
+                        if task.message_type == OFFLINE_RECOGNITION and self._recovery_result_callback is not None:
+                            self._recovery_result_callback(task.serial_number, _created, True)
                         if should_display:
                             self._command_manager.enqueue_serial(
                                 camera_id=action[0],
@@ -313,6 +337,8 @@ class RecognitionWorker:
                                 self._peripheral_event_callback(action[0], action[1])
                     except RecognitionIngestionRejected as error:
                         db.rollback()
+                        if task.message_type == OFFLINE_RECOGNITION and self._recovery_result_callback is not None:
+                            self._recovery_result_callback(task.serial_number, False, False)
                         logger.warning("Recognition rejected: %s", error)
                     except Exception:
                         db.rollback()

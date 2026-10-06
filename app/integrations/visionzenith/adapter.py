@@ -17,6 +17,7 @@ from app.integrations.visionzenith.recognition import (
 from app.integrations.visionzenith.topics import (
     ACCESS_LIST_REPLY,
     DEVICE_SET_REPLY,
+    OFFLINE_RECOVERY_REPLY,
     QUICK_RECOGNITION,
     RECOGNITION,
     SERIAL_REPLY,
@@ -96,7 +97,7 @@ class VisionZenithAdapter:
         if native_topic.message_type == KEEP_ALIVE:
             process_native_heartbeat(db, topic, payload, now=now)
             return KEEP_ALIVE
-        if native_topic.message_type in (SERIAL_REPLY, ACCESS_LIST_REPLY, DEVICE_SET_REPLY):
+        if native_topic.message_type in (SERIAL_REPLY, ACCESS_LIST_REPLY, DEVICE_SET_REPLY, OFFLINE_RECOVERY_REPLY):
             if not command_manager.handle_reply(
                 native_topic.serial_number, payload
             ):

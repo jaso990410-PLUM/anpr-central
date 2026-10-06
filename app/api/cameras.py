@@ -19,6 +19,7 @@ from sqlalchemy import select
 from app.services.camera_service import CameraService, CameraValidationError
 from app.services.dashboard_service import get_dashboard_summary
 from app.services.mqtt_service import mqtt_heartbeat_service
+from app.services.offline_recovery_service import OfflineRecoveryRejected
 from app.services.shell_service import build_navigation, role_label
 from app.web import templates
 
@@ -203,6 +204,7 @@ def camera_detail(
             "camera": service.camera_detail(camera),
             "recent_commands": service.recent_commands(camera),
             "access_sync_summary": service.access_list_sync_summary(camera),
+            "offline_recovery": service.offline_recovery_summary(camera),
             "can_manage_cameras": user_has_permission(user, "cameras.manage"),
             "can_view_control_board": user_has_permission(user, "control_board.view"),
             "can_delete_all_access_list": user_has_permission(user, "access_list.delete_all_camera"),
@@ -212,6 +214,41 @@ def camera_detail(
         request=request,
         name="cameras/detail.html",
         context=context,
+    )
+
+
+@router.post("/{camera_id}/offline-recovery")
+def recover_offline_recognitions(
+    camera_id: UUID,
+    request: Request,
+    user: User = Depends(require_page_permission("cameras.manage")),
+    _csrf: str = Depends(require_session_csrf),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    camera = _camera_or_404(CameraService(db), camera_id)
+    try:
+        run = mqtt_heartbeat_service.recover_offline_events(camera.id)
+    except (RuntimeError, OfflineRecoveryRejected) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    create_audit_log(
+        db,
+        action="camera.offline_recovery_request",
+        actor_user_id=user.id,
+        site_id=camera.site_id,
+        entity_type="camera",
+        entity_id=str(camera.id),
+        details={
+            "camera_code": camera.code,
+            "recovery_run_id": str(run.id),
+            "reported_backlog": run.last_reported_count,
+            "requested_max_count": run.requested_max_count,
+        },
+        ip_address=request.client.host if request.client else None,
+    )
+    db.commit()
+    return RedirectResponse(
+        f"/cameras/{camera.id}?offline_recovery=requested",
+        status_code=status.HTTP_303_SEE_OTHER,
     )
 
 

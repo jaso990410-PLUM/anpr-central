@@ -26,6 +26,7 @@ class RetainedRecognitionIgnored(RecognitionRejected):
 class RecognitionMessage:
     plate: str
     event_id: str | None
+    record_id: str | None
     document: dict[str, Any]
     plate_result: dict[str, Any]
     captured_at: datetime | None
@@ -64,6 +65,7 @@ def parse_recognition(payload: bytes, *, retained: bool = False) -> RecognitionM
     return RecognitionMessage(
         plate=plate,
         event_id=str(event_id) if event_id is not None else None,
+        record_id=_safe_text(result.get("plateid"), 80),
         document=document,
         plate_result=result,
         captured_at=_capture_time(result, document),

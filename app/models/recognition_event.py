@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, JSON, String, Uuid, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, JSON, String, Uuid, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -22,6 +22,8 @@ class RecognitionEvent(Base):
         Index("ix_recognition_events_updated_at", "updated_at"),
         Index("ix_recognition_events_plate_text", "plate_text"),
         Index("ix_recognition_events_vendor_event_id", "vendor_event_id"),
+        Index("ix_recognition_events_source", "source"),
+        Index("ix_recognition_events_camera_captured", "camera_id", "captured_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -36,6 +38,9 @@ class RecognitionEvent(Base):
         nullable=False, index=True,
     )
     vendor_event_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    vendor_record_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="LIVE", server_default=text("'LIVE'"))
+    recovered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     plate_text: Mapped[str] = mapped_column(String(32), nullable=False)
     direction: Mapped[str | None] = mapped_column(String(20), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)

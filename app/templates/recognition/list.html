@@ -14,30 +14,32 @@
         <div class="field-group"><label for="filter-plate">Plate</label><input id="filter-plate" name="plate" maxlength="32" value="{{ filters.plate }}"></div>
         <div class="field-group"><label for="filter-camera">Camera</label><select id="filter-camera" name="camera"><option value="">All cameras</option>{% for camera in cameras %}<option value="{{ camera.id }}" {% if filters.camera == camera.id|string %}selected{% endif %}>{{ camera.code }}</option>{% endfor %}</select></div>
         <div class="field-group"><label for="filter-direction">Direction</label><select id="filter-direction" name="direction"><option value="">All directions</option><option value="ENTRY" {% if filters.direction == "ENTRY" %}selected{% endif %}>ENTRY</option><option value="EXIT" {% if filters.direction == "EXIT" %}selected{% endif %}>EXIT</option></select></div>
+        <div class="field-group"><label for="filter-source">Source</label><select id="filter-source" name="source"><option value="">All sources</option><option value="LIVE" {% if filters.source == "LIVE" %}selected{% endif %}>Live</option><option value="OFFLINE_RECOVERY" {% if filters.source == "OFFLINE_RECOVERY" %}selected{% endif %}>Recovered</option></select></div>
         <div class="field-group"><label for="filter-from">From</label><input id="filter-from" type="date" name="date_from" value="{{ filters.date_from }}"></div>
         <div class="field-group"><label for="filter-to">To</label><input id="filter-to" type="date" name="date_to" value="{{ filters.date_to }}"></div>
         <div class="filter-actions"><button class="button-primary button-primary--compact" type="submit">Apply filters</button><a class="button-quiet" href="/recognition">Clear</a></div>
     </form>
 </section>
 
-<section class="ops-panel" aria-labelledby="recognition-table-title" data-live-recognitions data-cursor="{{ live_cursor }}" data-poll-seconds="{{ live_poll_seconds }}" data-can-manage-access="{{ 'true' if can_manage_access_list else 'false' }}">
+<section class="ops-panel" aria-labelledby="recognition-table-title" data-live-recognitions data-cursor="{{ live_cursor }}" data-source="{{ filters.source }}" data-poll-seconds="{{ live_poll_seconds }}" data-can-manage-access="{{ 'true' if can_manage_access_list else 'false' }}">
     <header class="panel-header"><div><p class="panel-kicker">Operational events</p><h2 id="recognition-table-title">Recognition feed</h2></div><span class="status-badge status-badge--neutral">Page {{ result.page }} / {{ result.page_count }}</span></header>
     <div class="table-wrap">
         <table class="data-table recognition-table">
-            <thead><tr><th>Plate</th><th>Camera</th><th>Site</th><th>Direction</th><th>Access</th><th>Confidence</th><th>Detected</th><th>Status</th><th>Images</th></tr></thead>
+            <thead><tr><th>Plate</th><th>Camera</th><th>Site</th><th>Direction</th><th>Source</th><th>Access</th><th>Confidence</th><th>Detected</th><th>Status</th><th>Images</th></tr></thead>
             <tbody data-recognition-rows>
                 {% for event in result.items %}
                 <tr data-event-id="{{ event.id }}">
                     <td><strong class="plate-value" data-field="plate">{{ event.plate }}</strong></td>
                     <td data-field="camera">{{ event.camera }}</td><td data-field="site">{{ event.site }}</td>
                     <td><span class="status-badge status-badge--{{ event.direction_code|lower }}" data-field="direction">{{ event.direction }}</span></td>
+                    <td><span class="status-badge status-badge--{% if event.source == 'LIVE' %}online{% else %}neutral{% endif %}" data-field="source">{{ event.source_label }}</span></td>
                     <td data-field="access"><span class="status-badge status-badge--{{ event.access_badge_tone }}" data-access-badge>{{ event.access_label }}</span>{% if event.access_sync_status %}<small class="recognition-access__sync" data-access-sync>Camera sync: {{ event.access_sync_status }}</small>{% endif %}{% if can_manage_access_list %}<span class="recognition-access__actions" data-access-actions>{% if event.access_entry_id %}<a class="table-link" href="/access-list/{{ event.access_entry_id }}">Edit Access</a>{% else %}<a class="table-link" href="/access-list/new?recognition_id={{ event.id }}&amp;list_type=ALLOW">Add to Whitelist</a><a class="table-link" href="/access-list/new?recognition_id={{ event.id }}&amp;list_type=BLOCK">Add to Blacklist</a>{% endif %}</span>{% endif %}</td>
                     <td class="data-text" data-field="confidence">{{ event.confidence_display }}</td>
                     <td class="data-text" data-field="time">{{ event.captured_display }}</td>
                     <td><span class="status-badge {% if event.status == 'Complete' %}status-badge--online{% else %}status-badge--warning{% endif %}" data-field="status">{{ event.status }}</span></td>
                     <td data-field="images">{% if event.plate_image_url %}<a class="table-link image-action" href="{{ event.plate_image_url }}" data-recognition-image data-image-label="Plate Crop · {{ event.plate }}">Plate Crop</a>{% endif %}{% if event.scene_image_url %}{% if event.plate_image_url %}<span class="image-action-separator">·</span>{% endif %}<a class="table-link image-action" href="{{ event.scene_image_url }}" data-recognition-image data-image-label="Scene · {{ event.plate }}">Scene</a>{% endif %}{% if not event.plate_image_url and not event.scene_image_url %}<span class="text-muted">Unavailable</span>{% endif %}</td>
                 </tr>
-                {% else %}<tr class="empty-row" data-empty-row><td colspan="9"><div class="empty-state"><strong>No recognition events found</strong><span>Events will appear when an enabled camera publishes native recognition results.</span></div></td></tr>{% endfor %}
+                {% else %}<tr class="empty-row" data-empty-row><td colspan="10"><div class="empty-state"><strong>No recognition events found</strong><span>Events will appear when an enabled camera publishes native recognition results.</span></div></td></tr>{% endfor %}
             </tbody>
         </table>
     </div>

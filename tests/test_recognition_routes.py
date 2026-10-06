@@ -89,6 +89,7 @@ def create_event(
     plate: str = "VAB1234",
     received_at: datetime | None = None,
     image_reference: str | None = None,
+    source: str = "LIVE",
 ) -> RecognitionEvent:
     received = received_at or datetime.now(timezone.utc)
     event = RecognitionEvent(
@@ -101,6 +102,7 @@ def create_event(
         captured_at=received,
         received_at=received,
         event_type="ENRICHED",
+        source=source,
         plate_image_path=image_reference,
     )
     db.add(event)
@@ -145,6 +147,13 @@ def test_recognition_history_filters_and_live_api_are_safe(
     first.direction = "1"  # legacy vendor motion value must not reach the UI
     first.confidence = 100
     create_event(db, camera, plate="JVV9876", received_at=now - timedelta(days=2))
+    create_event(
+        db,
+        camera,
+        plate="REC1234",
+        received_at=now - timedelta(hours=1),
+        source="OFFLINE_RECOVERY",
+    )
     db.commit()
     login(client)
 
@@ -164,6 +173,13 @@ def test_recognition_history_filters_and_live_api_are_safe(
     assert "100.0%" not in page.text
     assert 'data-live-recognitions' in page.text
     assert "/static/js/live.js" in page.text
+    assert "Source" in page.text
+
+    recovered_page = client.get("/recognition", params={"source": "OFFLINE_RECOVERY"})
+    assert recovered_page.status_code == 200
+    assert "REC1234" in recovered_page.text
+    assert "VAB1234" not in recovered_page.text
+    assert ">Recovered<" in recovered_page.text
 
     response = client.get("/api/recognitions/live")
     assert response.status_code == 200

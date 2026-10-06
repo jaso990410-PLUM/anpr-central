@@ -34,6 +34,7 @@ def recognition_history(
     plate: Annotated[str | None, Query(max_length=32)] = None,
     camera: UUID | None = None,
     direction: Annotated[str | None, Query(max_length=20)] = None,
+    source: Literal["LIVE", "OFFLINE_RECOVERY"] | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
@@ -50,6 +51,7 @@ def recognition_history(
         plate=plate,
         camera_id=camera,
         direction=direction,
+        source=source,
         date_from=date_from,
         date_to=date_to,
         page=page,
@@ -59,6 +61,7 @@ def recognition_history(
         "plate": (plate or "").strip(),
         "camera": str(camera) if camera else "",
         "direction": (direction or "").strip().upper(),
+        "source": source or "",
         "date_from": date_from.isoformat() if date_from else "",
         "date_to": date_to.isoformat() if date_to else "",
     }
@@ -81,7 +84,7 @@ def recognition_history(
             "filters": query_values,
             "previous_url": page_url(result.page - 1) if result.page > 1 else None,
             "next_url": page_url(result.page + 1) if result.page < result.page_count else None,
-            "live_cursor": service.current_cursor() or "",
+            "live_cursor": service.current_cursor(source=source) or "",
             "live_poll_seconds": settings.live_poll_seconds,
             "can_manage_access_list": user_has_permission(user, "access_list.manage"),
         },
@@ -118,12 +121,13 @@ def recognition_image(
 @router.get("/api/recognitions/live")
 def live_recognitions(
     after: Annotated[str | None, Query(max_length=300)] = None,
+    source: Literal["LIVE", "OFFLINE_RECOVERY"] | None = None,
     _user: User = Depends(require_permission("events.view")),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     service = RecognitionService(db)
     try:
-        events, cursor = service.changed_after(after, limit=50)
+        events, cursor = service.changed_after(after, limit=50, source=source)
     except LiveCursorError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return {

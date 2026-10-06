@@ -40,6 +40,7 @@ class RecognitionService:
         plate: str | None = None,
         camera_id: UUID | None = None,
         direction: str | None = None,
+        source: str | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
         page: int = 1,
@@ -48,6 +49,7 @@ class RecognitionService:
             plate=plate,
             camera_id=camera_id,
             direction=direction,
+            source=source,
             date_from=date_from,
             date_to=date_to,
         )
@@ -63,7 +65,10 @@ class RecognitionService:
             self._event_query()
             .where(*conditions)
             .order_by(
-                RecognitionEvent.received_at.desc(), RecognitionEvent.id.desc()
+                func.coalesce(
+                    RecognitionEvent.captured_at, RecognitionEvent.received_at
+                ).desc(),
+                RecognitionEvent.id.desc(),
             )
             .offset((page - 1) * settings.recognition_page_size)
             .limit(settings.recognition_page_size)
@@ -78,6 +83,7 @@ class RecognitionService:
     def latest(self) -> dict[str, object] | None:
         row = self.db.execute(
             self._event_query()
+            .where(RecognitionEvent.source == "LIVE")
             .order_by(
                 RecognitionEvent.received_at.desc(), RecognitionEvent.id.desc()
             )
@@ -85,9 +91,13 @@ class RecognitionService:
         ).one_or_none()
         return _event_dict(*row) if row else None
 
-    def current_cursor(self) -> str | None:
+    def current_cursor(self, *, source: str | None = None) -> str | None:
+        query = select(RecognitionEvent.updated_at, RecognitionEvent.id)
+        clean_source = (source or "").strip().upper()
+        if clean_source in {"LIVE", "OFFLINE_RECOVERY"}:
+            query = query.where(RecognitionEvent.source == clean_source)
         row = self.db.execute(
-            select(RecognitionEvent.updated_at, RecognitionEvent.id)
+            query
             .order_by(
                 RecognitionEvent.updated_at.desc(), RecognitionEvent.id.desc()
             )
@@ -96,10 +106,13 @@ class RecognitionService:
         return encode_cursor(*row) if row else None
 
     def changed_after(
-        self, cursor: str | None, *, limit: int = 50
+        self, cursor: str | None, *, limit: int = 50, source: str | None = None
     ) -> tuple[tuple[dict[str, object], ...], str | None]:
         limit = min(max(1, limit), 100)
         query = self._event_query()
+        clean_source = (source or "").strip().upper()
+        if clean_source in {"LIVE", "OFFLINE_RECOVERY"}:
+            query = query.where(RecognitionEvent.source == clean_source)
         if cursor:
             changed_at, event_id = decode_cursor(cursor)
             query = query.where(
@@ -120,7 +133,7 @@ class RecognitionService:
         next_cursor = (
             encode_cursor(rows[-1][0].updated_at, rows[-1][0].id)
             if rows
-            else cursor or self.current_cursor()
+            else cursor or self.current_cursor(source=source)
         )
         return items, next_cursor
 
@@ -164,6 +177,7 @@ class RecognitionService:
         plate: str | None,
         camera_id: UUID | None,
         direction: str | None,
+        source: str | None,
         date_from: date | None,
         date_to: date | None,
     ) -> tuple[object, ...]:
@@ -187,13 +201,22 @@ class RecognitionService:
                     ),
                 )
             )
+        clean_source = (source or "").strip().upper()
+        if clean_source in {"LIVE", "OFFLINE_RECOVERY"}:
+            conditions.append(RecognitionEvent.source == clean_source)
         display_timezone = self._timezone()
         if date_from:
             start = datetime.combine(date_from, time.min, display_timezone)
-            conditions.append(RecognitionEvent.received_at >= start.astimezone(timezone.utc))
+            conditions.append(
+                func.coalesce(RecognitionEvent.captured_at, RecognitionEvent.received_at)
+                >= start.astimezone(timezone.utc)
+            )
         if date_to:
             end = datetime.combine(date_to + timedelta(days=1), time.min, display_timezone)
-            conditions.append(RecognitionEvent.received_at < end.astimezone(timezone.utc))
+            conditions.append(
+                func.coalesce(RecognitionEvent.captured_at, RecognitionEvent.received_at)
+                < end.astimezone(timezone.utc)
+            )
         return tuple(conditions)
 
     def _timezone(self) -> ZoneInfo | timezone:
@@ -263,6 +286,8 @@ def _event_dict(
             "%H:%M:%S"
         ),
         "status": "Processing" if event.event_type == "QUICK" else "Complete",
+        "source": event.source,
+        "source_label": "Recovered" if event.source == "OFFLINE_RECOVERY" else "Live",
         "has_scene_image": bool(event.scene_image_path),
         "has_plate_image": bool(event.plate_image_path),
         "scene_image_url": (

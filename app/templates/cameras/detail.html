@@ -55,6 +55,28 @@
     <p class="panel-note">Native messages are mapped by vendor serial number to this camera UUID. The custom ANPR heartbeat remains available for MQTTX regression testing.</p>
 </section>
 
+<section class="ops-panel" aria-labelledby="offline-recovery-title">
+    <header class="panel-header">
+        <div><p class="panel-kicker">Historical event recovery</p><h2 id="offline-recovery-title">Offline Recognition Recovery</h2></div>
+        <span class="status-badge status-badge--{% if offline_recovery.status == 'COMPLETED' %}online{% elif offline_recovery.active %}warning{% elif offline_recovery.status == 'IDLE' %}neutral{% else %}offline{% endif %}">{{ offline_recovery.status|replace('_', ' ') }}</span>
+    </header>
+    <div class="dashboard-mqtt-facts">
+        <div><span>Reported backlog</span><strong>{{ offline_recovery.backlog }}</strong></div>
+        <div><span>Messages received</span><strong>{{ offline_recovery.messages_received }}</strong></div>
+        <div><span>Events added</span><strong>{{ offline_recovery.events_inserted }}</strong></div>
+        <div><span>Duplicates skipped</span><strong>{{ offline_recovery.duplicates_skipped }}</strong></div>
+        <div><span>Invalid skipped</span><strong>{{ offline_recovery.invalid_skipped }}</strong></div>
+    </div>
+    {% if offline_recovery.last_error %}<div class="alert alert--error"><strong>Recovery needs attention.</strong> {{ offline_recovery.last_error }}</div>{% endif %}
+    <p class="panel-note">Recovery starts automatically when the camera reports a non-zero offline backlog. Recovered events retain their original recognition time and never trigger live physical outputs.</p>
+    {% if can_manage_cameras %}
+    <form class="panel-actions" method="post" action="/cameras/{{ camera.id }}/offline-recovery">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button-secondary" type="submit" {% if offline_recovery.active or not offline_recovery.can_retry %}disabled{% endif %}>Recover Offline Events</button>
+    </form>
+    {% endif %}
+</section>
+
 <section class="ops-panel" aria-labelledby="camera-access-list-title">
     <header class="panel-header"><div><p class="panel-kicker">Edge synchronization</p><h2 id="camera-access-list-title">Access List</h2></div><span class="status-badge {% if camera.access_list_sync_enabled %}status-badge--active{% else %}status-badge--disabled{% endif %}">{{ "Participating" if camera.access_list_sync_enabled else "Not participating" }}</span></header>
     <div class="dashboard-mqtt-facts">

@@ -222,3 +222,17 @@ def device_set_envelope(
         "timestamp": timestamp if timestamp is not None else int(datetime.now(timezone.utc).timestamp()),
         "payload": {"type": setting_type, "module": "", "body": body},
     }
+
+
+def offline_recovery_envelope(*, request_id: str, serial_number: str, bv: int, max_count: int, min_id: int = 0, timestamp: int | None = None) -> dict[str, Any]:
+    if max_count < 1 or min_id < 0:
+        raise ValueError("Invalid offline recovery request")
+    return {
+        "id": request_id,
+        "bv": bv,
+        "sn": serial_number,
+        "name": "check_offline_record",
+        "version": "1.0",
+        "timestamp": timestamp if timestamp is not None else int(datetime.now(timezone.utc).timestamp()),
+        "payload": {"type": "check_offline_record", "body": {"enable": "push", "max_count": max_count, "min_id": min_id}},
+    }

@@ -169,6 +169,11 @@ class CameraService:
             whitelist_topic=f"{topic_root}/whitelist",
         )
 
+    def offline_recovery_summary(self, camera: Camera) -> dict[str, object]:
+        from app.services.offline_recovery_service import recovery_summary
+
+        return recovery_summary(self.db, camera.id)
+
     def recent_commands(
         self, camera: Camera, *, limit: int = 8
     ) -> tuple[dict[str, str], ...]:

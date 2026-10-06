@@ -17,11 +17,13 @@ from app.models.control_board import ControlBoard
 from app.integrations.visionzenith.protocol import (
     access_list_envelope,
     device_set_envelope,
+    offline_recovery_envelope,
     serial_envelope,
 )
 from app.integrations.visionzenith.topics import (
     access_list_topic,
     device_set_topic,
+    offline_recovery_topic,
     serial_command_topic,
 )
 from app.integrations.visionzenith.access_list import FIELDS
@@ -166,6 +168,19 @@ class VisionZenithCommandManager:
             payload=json.dumps(envelope, ensure_ascii=False),
             qos=0,
             request_metadata=request_metadata,
+        )
+
+    def enqueue_offline_recovery(self, *, camera_id: UUID, serial_number: str, max_count: int, min_id: int = 0) -> CameraCommand:
+        request_id = f"OFFLINE_RECOVERY-{uuid4().hex[:16]}"
+        envelope = offline_recovery_envelope(request_id=request_id, serial_number=serial_number, bv=settings.visionzenith_bv, max_count=max_count, min_id=min_id)
+        return self._persist_and_enqueue(
+            camera_id=camera_id,
+            request_id=request_id,
+            command_type="OFFLINE_RECOVERY_PUSH",
+            topic=offline_recovery_topic(serial_number),
+            payload=json.dumps(envelope, ensure_ascii=False),
+            qos=1,
+            request_metadata={"enable": "push", "max_count": max_count, "min_id": min_id},
         )
 
     def _persist_and_enqueue(

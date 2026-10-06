@@ -1,5 +1,6 @@
 import re
 import uuid
+from types import SimpleNamespace
 from collections.abc import Generator
 from datetime import datetime, timedelta, timezone
 
@@ -1888,6 +1889,10 @@ def test_camera_view_and_manage_permissions_are_enforced(
         f"/cameras/{camera.id}/commands/test-led",
         data={"csrf_token": csrf_token},
     )
+    recovery_response = client.post(
+        f"/cameras/{camera.id}/offline-recovery",
+        data={"csrf_token": csrf_token},
+    )
 
     assert camera_list.status_code == 200
     assert detail.status_code == 200
@@ -1895,6 +1900,7 @@ def test_camera_view_and_manage_permissions_are_enforced(
     assert create_response.status_code == 403
     assert disable_response.status_code == 403
     assert led_test_response.status_code == 403
+    assert recovery_response.status_code == 403
     assert 'href="/cameras/new"' not in camera_list.text
     assert actor.username in detail.text
 
@@ -1917,6 +1923,57 @@ def test_camera_pages_deny_user_without_cameras_view(
 
     assert client.get("/cameras").status_code == 403
     assert client.get(f"/cameras/{camera.id}").status_code == 403
+
+
+def test_camera_offline_recovery_ui_permission_csrf_and_audit(
+    client: TestClient,
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actor = create_user(db, permissions=("cameras.view", "cameras.manage"))
+    site = create_site(db)
+    camera = Camera(
+        site_id=site.id,
+        code="MAIN-ENTRY-01",
+        name="Main Entry",
+        direction="ENTRY",
+        serial_number="RECOVERY-SN",
+        is_enabled=True,
+        provisioning_state="PROVISIONED",
+        connection_state="ONLINE",
+    )
+    db.add(camera)
+    db.commit()
+    assert login(client).status_code == 303
+
+    detail = client.get(f"/cameras/{camera.id}")
+    assert detail.status_code == 200
+    assert "Offline Recognition Recovery" in detail.text
+    assert "Recover Offline Events" in detail.text
+    assert "Clear Offline Records" not in detail.text
+    assert client.post(f"/cameras/{camera.id}/offline-recovery").status_code == 403
+
+    run_id = uuid.uuid4()
+    monkeypatch.setattr(
+        mqtt_heartbeat_service,
+        "recover_offline_events",
+        lambda camera_id: SimpleNamespace(
+            id=run_id,
+            last_reported_count=4,
+            requested_max_count=4,
+        ),
+    )
+    response = client.post(
+        f"/cameras/{camera.id}/offline-recovery",
+        data={"csrf_token": extract_csrf_token(detail.text)},
+    )
+    assert response.status_code == 303
+    audit = db.scalar(
+        select(AuditLog).where(AuditLog.action == "camera.offline_recovery_request")
+    )
+    assert audit is not None
+    assert audit.actor_user_id == actor.id
+    assert audit.details["recovery_run_id"] == str(run_id)
 
 
 def test_create_camera_stores_configuration_unprovisioned_state_and_audit(
