@@ -132,11 +132,32 @@ def image_candidates(plate_result: dict[str, Any]) -> tuple[tuple[str, str], ...
 def _capture_time(
     result: dict[str, Any], document: dict[str, Any]
 ) -> datetime | None:
+    timestamp = result.get("timeStamp")
+    if isinstance(timestamp, dict):
+        timeval = timestamp.get("Timeval")
+        if isinstance(timeval, dict):
+            seconds = timeval.get("sec")
+            microseconds = timeval.get("usec", 0)
+            if (
+                isinstance(seconds, (int, float))
+                and not isinstance(seconds, bool)
+                and isinstance(microseconds, (int, float))
+                and not isinstance(microseconds, bool)
+                and 0 <= microseconds < 1_000_000
+            ):
+                try:
+                    return datetime.fromtimestamp(
+                        float(seconds) + (float(microseconds) / 1_000_000),
+                        timezone.utc,
+                    )
+                except (ValueError, OSError, OverflowError):
+                    pass
+
     value = next(
         (
             candidate
             for candidate in (
-                result.get("timeStamp"),
+                timestamp if not isinstance(timestamp, dict) else None,
                 result.get("timestamp"),
                 result.get("capture_time"),
                 document.get("timestamp"),

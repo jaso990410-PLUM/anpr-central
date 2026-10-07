@@ -255,6 +255,31 @@ def test_timestamps_confidence_and_allowlisted_metadata() -> None:
     assert invalid.confidence is None
 
 
+def test_structured_ra5_capture_timestamp_takes_priority_over_delivery_time() -> None:
+    captured_seconds = 1_790_348_406
+    value = json.loads(payload(captured_at=None))
+    result = value["payload"]["AlarmInfoPlate"]["result"]["PlateResult"]
+    result["timeStamp"] = {
+        "Timeval": {
+            "decyear": 2026,
+            "decmon": 9,
+            "decday": 25,
+            "dechour": 23,
+            "decmin": 0,
+            "decsec": 6,
+            "sec": captured_seconds,
+            "usec": 707531,
+        }
+    }
+    value["timestamp"] = 1_791_384_455
+
+    parsed = parse_recognition(json.dumps(value).encode())
+
+    assert parsed.captured_at == datetime.fromtimestamp(
+        captured_seconds + 0.707531, timezone.utc
+    )
+
+
 @pytest.mark.parametrize(
     ("vendor_value", "motion"),
     [(0, "UNKNOWN"), (1, "LEFT"), (2, "RIGHT"), (3, "UP"), (4, "DOWN")],
