@@ -83,9 +83,12 @@ class RecognitionService:
     def latest(self) -> dict[str, object] | None:
         row = self.db.execute(
             self._event_query()
-            .where(RecognitionEvent.source == "LIVE")
             .order_by(
-                RecognitionEvent.received_at.desc(), RecognitionEvent.id.desc()
+                func.coalesce(
+                    RecognitionEvent.captured_at, RecognitionEvent.received_at
+                ).desc(),
+                RecognitionEvent.received_at.desc(),
+                RecognitionEvent.id.desc(),
             )
             .limit(1)
         ).one_or_none()

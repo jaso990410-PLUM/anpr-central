@@ -169,13 +169,15 @@
         if (!event) return;
         document.querySelector("[data-latest-recognition]")?.removeAttribute("hidden");
         document.querySelector("[data-latest-empty]")?.setAttribute("hidden", "");
-        const fields = { plate: event.plate, camera: event.camera_name || event.camera, direction: event.direction, access: event.access_label, time: event.captured_time_display };
+        const fields = { plate: event.plate, camera: event.camera_name || event.camera, direction: event.direction, source: event.source_label, access: event.access_label, time: event.captured_time_display };
         Object.entries(fields).forEach(([name, value]) => {
             const node = document.querySelector(`[data-latest-${name}]`);
             if (node) node.textContent = value;
         });
         const access = document.querySelector("[data-latest-access]");
         if (access) access.className = `status-badge status-badge--${event.access_badge_tone || "neutral"}`;
+        const source = document.querySelector("[data-latest-source]");
+        if (source) source.className = `status-badge status-badge--${event.source === "LIVE" ? "online" : "neutral"}`;
         if (event.plate_image_url) {
             let image = document.querySelector("[data-latest-image]");
             if (!image) {
@@ -185,6 +187,11 @@
                 document.querySelector(".latest-recognition__image")?.replaceChildren(image);
             }
             image.src = event.plate_image_url;
+        } else {
+            const placeholder = document.createElement("span");
+            placeholder.dataset.latestImagePlaceholder = "";
+            placeholder.textContent = "No image";
+            document.querySelector(".latest-recognition__image")?.replaceChildren(placeholder);
         }
     };
 

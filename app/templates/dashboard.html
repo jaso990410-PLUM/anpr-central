@@ -96,12 +96,13 @@
 
 {% if can_view_events %}
 <section class="ops-panel latest-recognition-panel" aria-labelledby="latest-recognition-title" data-live-recognitions data-cursor="{{ live_cursor or '' }}" data-poll-seconds="{{ live_poll_seconds }}" data-can-manage-access="{{ 'true' if can_manage_access_list else 'false' }}">
-    <header class="panel-header"><div><p class="panel-kicker">Live ANPR</p><h2 id="latest-recognition-title">Latest recognition</h2></div><a class="button-quiet" href="/recognition">View history</a></header>
+    <header class="panel-header"><div><p class="panel-kicker">ANPR activity</p><h2 id="latest-recognition-title">Latest recognition</h2></div><a class="button-quiet" href="/recognition">View history</a></header>
     <div class="latest-recognition" data-latest-recognition {% if not latest_recognition %}hidden{% endif %}>
         <div class="latest-recognition__image">{% if latest_recognition and latest_recognition.plate_image_url %}<img data-latest-image src="{{ latest_recognition.plate_image_url }}" alt="Latest recognized plate">{% else %}<span data-latest-image-placeholder>No image</span>{% endif %}</div>
         <div><span class="metric-label">Plate</span><strong class="plate-value plate-value--large" data-latest-plate>{{ latest_recognition.plate if latest_recognition else "—" }}</strong></div>
         <div><span>Camera</span><strong class="data-text" data-latest-camera>{{ latest_recognition.camera_name if latest_recognition else "—" }}</strong></div>
         <div><span>Direction</span><strong data-latest-direction>{{ latest_recognition.direction if latest_recognition else "—" }}</strong></div>
+        <div><span>Source</span><strong><span class="status-badge status-badge--{{ 'online' if latest_recognition and latest_recognition.source == 'LIVE' else 'neutral' }}" data-latest-source>{{ latest_recognition.source_label if latest_recognition else "—" }}</span></strong></div>
         <div><span>Access</span><strong><span class="status-badge status-badge--{{ latest_recognition.access_badge_tone if latest_recognition else 'neutral' }}" data-latest-access>{{ latest_recognition.access_label if latest_recognition else "—" }}</span></strong></div>
         <div><span>Recognition time</span><strong class="data-text" data-latest-time>{{ latest_recognition.captured_time_display if latest_recognition else "—" }}</strong></div>
     </div>

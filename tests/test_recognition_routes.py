@@ -261,6 +261,32 @@ def test_dashboard_shows_latest_recognition_for_authorized_user(
     assert 'data-latest-recognition' in dashboard.text
 
 
+def test_dashboard_latest_includes_recovered_by_original_detection_time(
+    client: TestClient, db: Session
+) -> None:
+    create_user(db, ("events.view",))
+    camera = create_camera(db)
+    now = datetime.now(timezone.utc)
+    create_event(db, camera, plate="LIVE123", received_at=now - timedelta(minutes=2))
+    recovered = create_event(
+        db,
+        camera,
+        plate="RECOVER1",
+        received_at=now,
+        source="OFFLINE_RECOVERY",
+    )
+    recovered.captured_at = now - timedelta(minutes=1)
+    db.commit()
+    login(client)
+
+    dashboard = client.get("/dashboard")
+
+    assert dashboard.status_code == 200
+    assert "RECOVER1" in dashboard.text
+    assert 'data-latest-source' in dashboard.text
+    assert ">Recovered<" in dashboard.text
+
+
 def test_recognition_text_is_escaped_and_live_script_uses_safe_dom_apis(
     client: TestClient, db: Session
 ) -> None:
