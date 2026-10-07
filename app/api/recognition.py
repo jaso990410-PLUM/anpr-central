@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, HTMLResponse
+from pydantic import BeforeValidator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -28,15 +29,34 @@ from app.web import templates
 router = APIRouter()
 
 
+def _blank_query_value_to_none(value: object) -> object:
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+OptionalCameraQuery = Annotated[
+    UUID | None, BeforeValidator(_blank_query_value_to_none), Query()
+]
+OptionalSourceQuery = Annotated[
+    Literal["LIVE", "OFFLINE_RECOVERY"] | None,
+    BeforeValidator(_blank_query_value_to_none),
+    Query(),
+]
+OptionalDateQuery = Annotated[
+    date | None, BeforeValidator(_blank_query_value_to_none), Query()
+]
+
+
 @router.get("/recognition", response_class=HTMLResponse)
 def recognition_history(
     request: Request,
     plate: Annotated[str | None, Query(max_length=32)] = None,
-    camera: UUID | None = None,
+    camera: OptionalCameraQuery = None,
     direction: Annotated[str | None, Query(max_length=20)] = None,
-    source: Literal["LIVE", "OFFLINE_RECOVERY"] | None = None,
-    date_from: date | None = None,
-    date_to: date | None = None,
+    source: OptionalSourceQuery = None,
+    date_from: OptionalDateQuery = None,
+    date_to: OptionalDateQuery = None,
     page: Annotated[int, Query(ge=1)] = 1,
     user: User = Depends(require_page_permission("events.view")),
     db: Session = Depends(get_db),
@@ -121,7 +141,7 @@ def recognition_image(
 @router.get("/api/recognitions/live")
 def live_recognitions(
     after: Annotated[str | None, Query(max_length=300)] = None,
-    source: Literal["LIVE", "OFFLINE_RECOVERY"] | None = None,
+    source: OptionalSourceQuery = None,
     _user: User = Depends(require_permission("events.view")),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:

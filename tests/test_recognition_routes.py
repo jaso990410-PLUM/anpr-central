@@ -181,6 +181,14 @@ def test_recognition_history_filters_and_live_api_are_safe(
     assert "VAB1234" not in recovered_page.text
     assert ">Recovered<" in recovered_page.text
 
+    all_sources_page = client.get(
+        "/recognition",
+        params={"camera": "", "source": "", "date_from": "", "date_to": ""},
+    )
+    assert all_sources_page.status_code == 200
+    assert "VAB1234" in all_sources_page.text
+    assert "REC1234" in all_sources_page.text
+
     response = client.get("/api/recognitions/live")
     assert response.status_code == 200
     body = response.json()
