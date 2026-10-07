@@ -113,21 +113,45 @@ def test_native_heartbeat_enqueues_safe_pending_access_sync(db: Session) -> None
     target.serial_number = "RA5-ACCESS"
     db.commit()
     queued: list[uuid.UUID] = []
+    probed: list[uuid.UUID] = []
 
     class FakeAccessSync:
         def enqueue_pending_for_camera(self, camera_id):
             queued.append(camera_id)
             return 1
 
+    class FakeOfflineRecovery:
+        def probe_connection(self, camera_id):
+            probed.append(camera_id)
+
     service = MqttHeartbeatService(session_factory=lambda: Session(db.get_bind(), expire_on_commit=False))
     service._command_manager = object()
     service._access_sync = FakeAccessSync()
+    service._offline_recovery = FakeOfflineRecovery()
+    service._process_queued_message(
+        "device/RA5-ACCESS/message/up/keep_alive",
+        b'{"sn":"RA5-ACCESS"}',
+        retained=True,
+    )
+    assert probed == []
+    service._process_queued_message(
+        "device/RA5-ACCESS/message/up/keep_alive",
+        b'{"sn":"RA5-ACCESS"}',
+    )
     service._process_queued_message(
         "device/RA5-ACCESS/message/up/keep_alive",
         b'{"sn":"RA5-ACCESS"}',
     )
 
-    assert queued == [target.id]
+    assert queued == [target.id, target.id]
+    assert probed == [target.id]
+
+    service._on_disconnect(None, None, None, 1, None)
+    service._process_queued_message(
+        "device/RA5-ACCESS/message/up/keep_alive",
+        b'{"sn":"RA5-ACCESS"}',
+    )
+    assert probed == [target.id, target.id]
 
 
 def test_valid_heartbeat_sets_online_seen_connected_and_agent_version(

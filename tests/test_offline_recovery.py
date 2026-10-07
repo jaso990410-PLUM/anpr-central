@@ -108,6 +108,7 @@ def test_offline_topics_and_push_envelope_are_documented_and_non_destructive() -
         "type": "check_offline_record",
         "body": {"enable": "push", "max_count": 100, "min_id": 0},
     }
+    assert envelope["model"] == "R5"
     assert "clear" not in json.dumps(envelope).lower()
 
 
@@ -160,6 +161,54 @@ def test_zero_backlog_does_not_create_or_request_a_recovery(db: Session) -> None
     assert service.handle_count(target.serial_number, count_payload(0)) is None
     assert manager.requests == []
     assert db.scalar(select(OfflineRecoveryRun)) is None
+
+
+def test_connection_probe_requests_one_then_uses_reported_remaining_count(
+    db: Session,
+) -> None:
+    target = camera(db)
+    manager = CommandManagerStub()
+    service = coordinator(db, manager)
+
+    run = service.probe_connection(target.id)
+    assert run.status == "REQUESTED"
+    assert run.initial_reported_count == 0
+    assert manager.requests[-1]["max_count"] == 1
+    assert manager.requests[-1]["min_id"] == 0
+
+    same_run = service.probe_connection(target.id)
+    assert same_run.id == run.id
+    assert len(manager.requests) == 1
+
+    service.record_message(target.serial_number, True, True)
+    continued = service.handle_count(target.serial_number, count_payload(2))
+    assert continued.initial_reported_count == 3
+    assert continued.last_reported_count == 2
+    assert manager.requests[-1]["max_count"] == 2
+    assert len(manager.requests) == 2
+
+    service.record_message(target.serial_number, True, True)
+    service.record_message(target.serial_number, True, True)
+    completed = service.handle_count(target.serial_number, count_payload(0))
+    assert completed.status == "COMPLETED"
+    assert completed.last_reported_count == 0
+
+
+def test_connection_probe_does_not_restart_a_stalled_recovery(db: Session) -> None:
+    target = camera(db)
+    manager = CommandManagerStub()
+    service = coordinator(db, manager)
+
+    stalled = service.handle_count(target.serial_number, count_payload(4))
+    stalled = service.handle_count(target.serial_number, count_payload(4))
+    assert stalled.status == "STALLED"
+    request_count = len(manager.requests)
+
+    unchanged = service.probe_connection(target.id)
+
+    assert unchanged.id == stalled.id
+    assert unchanged.status == "STALLED"
+    assert len(manager.requests) == request_count
 
 
 def test_recovery_rejects_unknown_disabled_and_retained_camera(db: Session) -> None:

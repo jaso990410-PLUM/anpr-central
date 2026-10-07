@@ -231,6 +231,7 @@ def offline_recovery_envelope(*, request_id: str, serial_number: str, bv: int, m
         "id": request_id,
         "bv": bv,
         "sn": serial_number,
+        "model": "R5",
         "name": "check_offline_record",
         "version": "1.0",
         "timestamp": timestamp if timestamp is not None else int(datetime.now(timezone.utc).timestamp()),

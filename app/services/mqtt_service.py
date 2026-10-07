@@ -190,6 +190,8 @@ class MqttHeartbeatService:
         self._connected = Event()
         self._stop_event = Event()
         self._lifecycle_lock = Lock()
+        self._native_probe_lock = Lock()
+        self._native_probe_camera_ids: set[UUID] = set()
         self._client: mqtt.Client | None = None
         self._worker: Thread | None = None
         self._command_manager: VisionZenithCommandManager | None = None
@@ -306,6 +308,8 @@ class MqttHeartbeatService:
             self._running = True
             self._stop_event.clear()
             self._connected.clear()
+            with self._native_probe_lock:
+                self._native_probe_camera_ids.clear()
             self._command_manager = VisionZenithCommandManager(
                 session_factory=self._session_factory,
                 publisher=self._publish,
@@ -407,6 +411,8 @@ class MqttHeartbeatService:
                     self._control_board_runtime.stop()
                 self._command_manager.stop()
             self._connected.clear()
+            with self._native_probe_lock:
+                self._native_probe_camera_ids.clear()
             self._worker = None
             self._command_manager = None
             self._recognition_worker = None
@@ -445,6 +451,8 @@ class MqttHeartbeatService:
         _properties: Any,
     ) -> None:
         self._connected.clear()
+        with self._native_probe_lock:
+            self._native_probe_camera_ids.clear()
         if not self._stop_event.is_set():
             self._last_error = "Broker disconnected"
             logger.warning(
@@ -569,14 +577,16 @@ class MqttHeartbeatService:
                     self._offline_recovery.handle_ack(
                         native_topic.serial_number, payload
                     )
-                if dispatched == KEEP_ALIVE and self._access_sync is not None:
+                if dispatched == KEEP_ALIVE:
                     camera = db.scalar(
                         select(Camera).where(
                             Camera.serial_number == native_topic.serial_number
                         )
                     )
-                    if camera is not None:
-                        self._access_sync.enqueue_pending_for_camera(camera.id)
+                    if camera is not None and not retained:
+                        self._probe_offline_recovery(camera.id)
+                        if self._access_sync is not None:
+                            self._access_sync.enqueue_pending_for_camera(camera.id)
                         if self._control_board_runtime is not None:
                             self._control_board_runtime.restore_camera(camera.id)
             except (
@@ -599,6 +609,17 @@ class MqttHeartbeatService:
                 )
                 if changed:
                     db.commit()
+                    offline_camera_ids = set(
+                        db.scalars(
+                            select(Camera.id).where(
+                                Camera.connection_state == "OFFLINE"
+                            )
+                        ).all()
+                    )
+                    with self._native_probe_lock:
+                        self._native_probe_camera_ids.difference_update(
+                            offline_camera_ids
+                        )
                 if self._command_manager is not None:
                     self._command_manager.mark_orphaned_commands()
                 if self._offline_recovery is not None:
@@ -607,6 +628,21 @@ class MqttHeartbeatService:
             except Exception:
                 db.rollback()
                 logger.exception("Unexpected MQTT heartbeat timeout failure")
+
+    def _probe_offline_recovery(self, camera_id: UUID) -> None:
+        coordinator = self._offline_recovery
+        if coordinator is None:
+            return
+        with self._native_probe_lock:
+            if camera_id in self._native_probe_camera_ids:
+                return
+            self._native_probe_camera_ids.add(camera_id)
+        try:
+            coordinator.probe_connection(camera_id)
+        except Exception:
+            with self._native_probe_lock:
+                self._native_probe_camera_ids.discard(camera_id)
+            raise
 
     def _publish(self, topic: str, payload: str, qos: int) -> bool:
         client = self._client

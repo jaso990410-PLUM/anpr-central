@@ -110,6 +110,24 @@ class OfflineRecoveryCoordinator:
             camera = self._eligible_camera(db, serial_number)
             run = self._latest_run(db, camera.id)
             now = datetime.now(timezone.utc)
+            is_connection_probe = (
+                run is not None
+                and run.status in ACTIVE_STATUSES
+                and run.initial_reported_count == 0
+                and run.requested_max_count == 1
+            )
+
+            if is_connection_probe:
+                run.initial_reported_count = count + min(run.messages_received, 1)
+                run.last_reported_count = count
+                if count == 0:
+                    run.status = "COMPLETED"
+                    run.completed_at = now
+                    run.last_error = None
+                    db.commit()
+                    return run
+                db.commit()
+                return self._request_batch(db, camera, run)
 
             if count == 0:
                 if run is not None:
@@ -158,6 +176,34 @@ class OfflineRecoveryCoordinator:
 
             db.commit()
             return self._request_batch(db, camera, run)
+
+    def probe_connection(self, camera_id: UUID) -> OfflineRecoveryRun:
+        """Request at most one record after a newly observed RA5 connection."""
+        with self._session_factory() as db:
+            camera = db.get(Camera, camera_id)
+            if camera is None:
+                raise OfflineRecoveryRejected("Camera not found")
+            self._validate_camera(camera)
+            if camera.connection_state != "ONLINE":
+                raise OfflineRecoveryRejected("Camera is offline")
+            latest = self._latest_run(db, camera.id)
+            if latest is not None and latest.status in ACTIVE_STATUSES:
+                return latest
+            if latest is not None and latest.status == "STALLED":
+                return latest
+            run = OfflineRecoveryRun(
+                camera_id=camera.id,
+                status="BACKLOG_DETECTED",
+                initial_reported_count=0,
+                last_reported_count=0,
+                requested_max_count=1,
+                requested_min_id=0,
+                started_at=datetime.now(timezone.utc),
+            )
+            db.add(run)
+            db.commit()
+            db.refresh(run)
+            return self._request_batch(db, camera, run, max_count=1)
 
     def handle_ack(self, serial_number: str, payload: bytes) -> OfflineRecoveryRun | None:
         request_id, code = parse_recovery_ack(payload)
@@ -279,7 +325,12 @@ class OfflineRecoveryCoordinator:
             return self._request_batch(db, camera, run)
 
     def _request_batch(
-        self, db: Session, camera: Camera, run: OfflineRecoveryRun
+        self,
+        db: Session,
+        camera: Camera,
+        run: OfflineRecoveryRun,
+        *,
+        max_count: int | None = None,
     ) -> OfflineRecoveryRun:
         if not self._is_connected():
             run.status = "CAMERA_OFFLINE"
@@ -287,21 +338,19 @@ class OfflineRecoveryCoordinator:
             run.last_error = "ANPR Central is not connected to the MQTT broker"
             db.commit()
             return run
+        requested_count = max_count or min(
+            settings.offline_recovery_batch_size,
+            max(1, run.last_reported_count),
+        )
         command = self._command_manager.enqueue_offline_recovery(
             camera_id=camera.id,
             serial_number=camera.serial_number or "",
-            max_count=min(
-                settings.offline_recovery_batch_size,
-                max(1, run.last_reported_count),
-            ),
+            max_count=requested_count,
             min_id=0,
         )
         run.status = "REQUESTED"
         run.command_request_id = command.request_id
-        run.requested_max_count = min(
-            settings.offline_recovery_batch_size,
-            max(1, run.last_reported_count),
-        )
+        run.requested_max_count = requested_count
         run.requested_min_id = 0
         run.batch_start_messages = run.messages_received
         run.batch_start_inserted = run.events_inserted
