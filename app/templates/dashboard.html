@@ -82,6 +82,15 @@
     </article>
 </section>
 
+{% if can_view_parking %}
+<section class="metric-grid" aria-label="Parking summary">
+    <article class="metric-card"><span class="metric-label">Vehicles on site</span><strong class="metric-value">{{ parking_summary.on_site }}</strong><a class="table-link" href="/parking/on-site">Open occupancy</a></article>
+    <article class="metric-card"><span class="metric-label">Overstays</span><strong class="metric-value">{{ parking_summary.overstays }}</strong><span class="metric-status"><span class="status-dot status-dot--warning"></span>Active alerts</span></article>
+    <article class="metric-card"><span class="metric-label">Reconciliation issues</span><strong class="metric-value">{{ parking_summary.issues }}</strong><a class="table-link" href="/parking/history">Review stays</a></article>
+</section>
+{% if overstay_alerts %}<section class="ops-panel"><header class="panel-header"><div><p class="panel-kicker">Stay monitoring</p><h2>Overstay attention</h2></div></header>{% for alert in overstay_alerts[:5] %}<div class="alert alert--warning"><strong>{{ alert.plate }}</strong> &middot; {{ alert.detected }} &middot; {{ alert.status }}</div>{% endfor %}</section>{% endif %}
+{% endif %}
+
 <section class="ops-panel dashboard-mqtt-panel" aria-labelledby="dashboard-mqtt-title" {% if can_view_cameras %}data-live-status data-poll-seconds="{{ live_poll_seconds }}"{% endif %}>
     <header class="panel-header">
         <div><p class="panel-kicker">Central transport</p><h2 id="dashboard-mqtt-title">MQTT broker</h2></div>
@@ -106,6 +115,7 @@
         <div><span>Access</span><strong><span class="status-badge status-badge--{{ latest_recognition.access_badge_tone if latest_recognition else 'neutral' }}" data-latest-access>{{ latest_recognition.access_label if latest_recognition else "—" }}</span></strong></div>
         <div><span>Recognition time</span><strong class="data-text" data-latest-time>{{ latest_recognition.captured_time_display if latest_recognition else "—" }}</strong></div>
     </div>
+    {% if can_view_parking and latest_recognition %}<div class="panel-note">Decision: <span class="status-badge status-badge--{{ latest_recognition.decision_tone }}">{{ latest_recognition.decision_label }}</span> {{ latest_recognition.decision_reason }}</div>{% endif %}
     <div class="empty-state" data-latest-empty {% if latest_recognition %}hidden{% endif %}><strong>No recognitions received</strong><span>The latest native event will appear automatically.</span></div>
 </section>
 {% endif %}

@@ -20,6 +20,10 @@ from app.models.site import Site
 from app.models.user import User
 from app.models.user_session import UserSession
 from app.models.vehicle import Vehicle
+from app.models.parking import (
+    AccessDecision, AccessProfile, DecisionResponseProfile, OverstayAlert,
+    ParkingSession, ParkingSessionIssue, SitePolicy,
+)
 
 __all__ = [
     "AccessListCameraSync",
@@ -42,4 +46,11 @@ __all__ = [
     "User",
     "UserSession",
     "Vehicle",
+    "AccessDecision",
+    "AccessProfile",
+    "DecisionResponseProfile",
+    "OverstayAlert",
+    "ParkingSession",
+    "ParkingSessionIssue",
+    "SitePolicy",
 ]

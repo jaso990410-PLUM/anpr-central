@@ -38,6 +38,7 @@ class CameraListItem:
     site_code: str
     site_name: str
     direction: str
+    lane_role: str
     manufacturer_model: str
     protocol: str
     serial_number: str | None
@@ -58,6 +59,7 @@ class CameraDetail:
     site_name: str
     site_timezone: str
     direction: str
+    lane_role: str
     manufacturer: str | None
     model: str | None
     serial_number: str | None
@@ -96,6 +98,7 @@ class CameraService:
                 site_code=camera.site.code,
                 site_name=camera.site.name,
                 direction=camera.direction,
+                lane_role=camera.lane_role,
                 manufacturer_model=_manufacturer_model(camera),
                 protocol="VisionZenith Native MQTT",
                 serial_number=camera.serial_number,
@@ -139,6 +142,7 @@ class CameraService:
             site_name=camera.site.name,
             site_timezone=camera.site.timezone,
             direction=camera.direction,
+            lane_role=camera.lane_role,
             manufacturer=camera.manufacturer,
             model=camera.model,
             serial_number=camera.serial_number,
@@ -297,6 +301,7 @@ class CameraService:
                     code=clean_code,
                     name=clean_name,
                     direction=clean_direction,
+                    lane_role=clean_direction if clean_direction in {"ENTRY", "EXIT"} else "UNSPECIFIED",
                     manufacturer=clean_manufacturer,
                     model=clean_model,
                     serial_number=clean_serial,
@@ -312,6 +317,15 @@ class CameraService:
                 "The camera code or serial number is already in use."
             ) from error
         return camera
+
+    def set_lane_role(self, camera: Camera, lane_role: str) -> bool:
+        clean = lane_role.strip().upper()
+        if clean not in {"ENTRY", "EXIT", "UNSPECIFIED"}:
+            raise CameraValidationError("Select Entry, Exit, or Unspecified.")
+        changed = camera.lane_role != clean
+        camera.lane_role = clean
+        self.db.flush()
+        return changed
 
     def set_enabled(self, camera: Camera, *, enabled: bool) -> bool:
         changed = camera.is_enabled != enabled

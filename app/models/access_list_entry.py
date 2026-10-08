@@ -34,9 +34,14 @@ class AccessListEntry(Base):
     daily_start: Mapped[time | None] = mapped_column(Time())
     daily_end: Mapped[time | None] = mapped_column(Time())
     camera_comment: Mapped[str | None] = mapped_column(String(16))
+    access_profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("access_profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    max_stay_minutes_override: Mapped[int | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     vehicle: Mapped["Vehicle"] = relationship(back_populates="access_entries")
     site: Mapped["Site"] = relationship()
     camera_syncs: Mapped[list["AccessListCameraSync"]] = relationship(back_populates="access_entry", cascade="all, delete-orphan")
+    access_profile = relationship("AccessProfile")

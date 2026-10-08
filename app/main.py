@@ -16,6 +16,7 @@ from app.api.live_status import router as live_status_router
 from app.api.recognition import router as recognition_router
 from app.api.pages import login_redirect_for, router as pages_router
 from app.api.peripheral_presets import router as peripheral_presets_router
+from app.api.parking import router as parking_router
 from app.api.users import router as users_router
 from app.core.config import settings
 from app.db.session import SessionLocal, engine
@@ -25,6 +26,7 @@ from app.dependencies.auth import (
 )
 from app.services.mqtt_service import mqtt_heartbeat_service
 from app.services.mqtt_config_service import MqttConfigService
+from app.services.stay_monitor_service import stay_monitor_service
 from app.web import STATIC_DIR
 
 
@@ -37,10 +39,12 @@ def _startup_mqtt_configuration():
 async def lifespan(application: FastAPI):
     application.state.mqtt_service = mqtt_heartbeat_service
     mqtt_heartbeat_service.reconfigure(_startup_mqtt_configuration())
+    stay_monitor_service.start()
     try:
         yield
     finally:
         mqtt_heartbeat_service.stop()
+        stay_monitor_service.stop()
 
 
 app = FastAPI(
@@ -64,6 +68,7 @@ app.include_router(live_status_router)
 app.include_router(recognition_router)
 app.include_router(pages_router)
 app.include_router(peripheral_presets_router)
+app.include_router(parking_router)
 app.include_router(users_router)
 
 

@@ -1,0 +1,11 @@
+{% extends "base_app.html" %}
+{% block title %}On-Site Vehicles &middot; ANPR Central{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">Residential operations</p><h1>On-Site Vehicles</h1><p>Open stays and vehicles requiring overstay attention.</p></div></header>
+{% if alerts %}<section class="ops-panel"><header class="panel-header"><div><p class="panel-kicker">Attention required</p><h2>Overstay Alerts</h2></div><span class="status-badge status-badge--warning">{{ alerts|length }} ACTIVE</span></header>
+{% for alert in alerts %}<div class="alert alert--warning"><strong>{{ alert.plate }}</strong> exceeded its configured stay at {{ alert.detected }}. <span class="status-badge status-badge--warning">{{ alert.status }}</span>{% if alert.status == 'OPEN' %}<form class="inline-form" method="post" action="/parking/alerts/{{ alert.id }}/ack"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-quiet" type="submit">Acknowledge</button></form>{% endif %}</div>{% endfor %}</section>{% endif %}
+<section class="ops-panel"><header class="panel-header"><div><p class="panel-kicker">Current occupancy</p><h2>Active Stays</h2></div></header>
+<div class="table-wrap"><table class="data-table"><thead><tr><th>Plate</th><th>Name</th><th>Site</th><th>Entered</th><th>Duration</th><th>Profile</th><th>Status</th></tr></thead><tbody>
+{% for item in sessions %}<tr><td><a href="/parking/sessions/{{ item.id }}"><strong>{{ item.plate }}</strong></a></td><td>{{ item.name or '—' }}</td><td>{{ item.site }}</td><td class="data-text">{{ item.entered }}</td><td>{{ item.duration }}</td><td>{{ item.profile }}</td><td><span class="status-badge status-badge--{{ 'warning' if item.status == 'OVERSTAY' else 'online' }}">{{ item.status }}</span></td></tr>
+{% else %}<tr class="empty-row"><td colspan="7">No vehicles are currently recorded on site.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

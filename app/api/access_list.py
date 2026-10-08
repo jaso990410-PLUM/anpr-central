@@ -16,6 +16,8 @@ from app.dependencies.csrf import require_session_csrf
 from app.models.access_list_entry import AccessListEntry
 from app.models.recognition_event import RecognitionEvent
 from app.models.user import User
+from app.models.parking import AccessProfile
+from sqlalchemy import select
 from app.services.access_list_service import (
     AccessListService,
     AccessListValidationError,
@@ -70,6 +72,8 @@ def _form_values(form: dict[str, object]) -> dict[str, object]:
         "daily_start": form.get("daily_start") or "",
         "daily_end": form.get("daily_end") or "",
         "camera_comment": form.get("camera_comment") or "",
+        "access_profile_id": form.get("access_profile_id") or "",
+        "max_stay_minutes_override": form.get("max_stay_minutes_override") or "",
     }
 
 
@@ -94,6 +98,8 @@ def _entry_values(entry: AccessListEntry) -> dict[str, object]:
         "daily_start": entry.daily_start.strftime("%H:%M") if entry.daily_start else "",
         "daily_end": entry.daily_end.strftime("%H:%M") if entry.daily_end else "",
         "camera_comment": entry.camera_comment or "",
+        "access_profile_id": str(entry.access_profile_id) if entry.access_profile_id else "",
+        "max_stay_minutes_override": entry.max_stay_minutes_override or "",
     }
 
 
@@ -137,7 +143,7 @@ def access_list_index(
 
 def _render_form(request: Request, db: Session, user: User, *, values: dict[str, object], error: str | None = None, status_code: int = 200) -> HTMLResponse:
     context = _context(request, db, user)
-    context.update({"sites": AccessListService(db).sites(), "values": values, "error": error})
+    context.update({"sites": AccessListService(db).sites(), "access_profiles": tuple(db.scalars(select(AccessProfile).where(AccessProfile.enabled.is_(True)).order_by(AccessProfile.name)).all()), "values": values, "error": error})
     return templates.TemplateResponse(request=request, name="access_list/new.html", context=context, status_code=status_code)
 
 
@@ -175,6 +181,8 @@ def create_access_entry(
     valid_until: Annotated[str | None, Form()] = None, daily_window_enabled: Annotated[str | None, Form()] = None,
     daily_start: Annotated[str | None, Form()] = None, daily_end: Annotated[str | None, Form()] = None,
     camera_comment: Annotated[str | None, Form()] = None,
+    access_profile_id: Annotated[str | None, Form()] = None,
+    max_stay_minutes_override: Annotated[str | None, Form()] = None,
     reference_name: Annotated[str | None, Form(max_length=120)] = None,
     recognition_id: Annotated[UUID | None, Form()] = None,
     user: User = Depends(require_page_permission("access_list.manage")),
@@ -233,7 +241,7 @@ def delete_camera_record(
 def access_entry_detail(entry_id: UUID, request: Request, user: User = Depends(require_page_permission("access_list.view")), db: Session = Depends(get_db)) -> HTMLResponse:
     entry = _entry_or_404(AccessListService(db), entry_id)
     context = _context(request, db, user)
-    context.update({"entry": entry, "values": _entry_values(entry), "overall_status": overall_sync_status(entry), "display_datetime": display_datetime, "error": None})
+    context.update({"entry": entry, "values": _entry_values(entry), "access_profiles": tuple(db.scalars(select(AccessProfile).where(AccessProfile.site_id == entry.site_id, AccessProfile.enabled.is_(True)).order_by(AccessProfile.name)).all()), "overall_status": overall_sync_status(entry), "display_datetime": display_datetime, "error": None})
     return templates.TemplateResponse(request=request, name="access_list/detail.html", context=context)
 
 
@@ -243,6 +251,7 @@ def update_access_entry(
     valid_from: Annotated[str | None, Form()] = None, valid_until: Annotated[str | None, Form()] = None,
     daily_window_enabled: Annotated[str | None, Form()] = None, daily_start: Annotated[str | None, Form()] = None,
     daily_end: Annotated[str | None, Form()] = None, camera_comment: Annotated[str | None, Form()] = None,
+    access_profile_id: Annotated[str | None, Form()] = None, max_stay_minutes_override: Annotated[str | None, Form()] = None,
     reference_name: Annotated[str | None, Form(max_length=120)] = None,
     user: User = Depends(require_page_permission("access_list.manage")), _csrf: str = Depends(require_session_csrf), db: Session = Depends(get_db),
 ) -> Response:
@@ -254,7 +263,7 @@ def update_access_entry(
         before = service.update(entry, reference_name=reference_name, **access_values)
     except AccessListValidationError as error:
         context = _context(request, db, user)
-        context.update({"entry": entry, "values": values, "overall_status": overall_sync_status(entry), "display_datetime": display_datetime, "error": str(error)})
+        context.update({"entry": entry, "values": values, "access_profiles": tuple(db.scalars(select(AccessProfile).where(AccessProfile.site_id == entry.site_id, AccessProfile.enabled.is_(True)).order_by(AccessProfile.name)).all()), "overall_status": overall_sync_status(entry), "display_datetime": display_datetime, "error": str(error)})
         return templates.TemplateResponse(request=request, name="access_list/detail.html", context=context, status_code=400)
     create_audit_log(db, action="access_list.update", actor_user_id=user.id, site_id=entry.site_id, entity_type="access_list_entry", entity_id=str(entry.id), details={"before": before, "after": entry_summary(entry)}, ip_address=request.client.host if request.client else None)
     db.commit()

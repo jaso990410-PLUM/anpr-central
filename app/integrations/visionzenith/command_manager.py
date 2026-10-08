@@ -203,9 +203,12 @@ class VisionZenithCommandManager:
                 request_metadata=request_metadata,
             )
             db.add(command)
-            db.commit()
-            db.refresh(command)
+            # Flush server-generated values before commit, then detach the
+            # return object. This avoids a post-commit refresh racing a
+            # per-camera worker on SQLite while preserving PostgreSQL behavior.
+            db.flush()
             db.expunge(command)
+            db.commit()
 
         task = CommandTask(camera_id, request_id, topic, payload, qos)
         queue = self._camera_queue(camera_id)

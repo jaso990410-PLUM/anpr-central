@@ -28,6 +28,10 @@ _PERMISSION_NAVIGATION = (
     ("Management", "access-list", "Access List", "access-list", "access_list.view", "/access-list"),
     ("Management", "users", "Users", "users", "users.view", "/users"),
     ("Monitoring", "recognition", "Recognition History", "recognition", "events.view", "/recognition"),
+    ("Parking", "parking-on-site", "On-Site Vehicles", "vehicles", "parking.view", "/parking/on-site"),
+    ("Parking", "parking-history", "Stay History", "audit", "parking.view", "/parking/history"),
+    ("Parking", "access-profiles", "Access Profiles", "access-list", "parking.manage", "/access-profiles"),
+    ("Parking", "parking-policy", "Access Policy", "settings", "parking.manage", "/parking/policy"),
     ("Monitoring", "audit", "Audit Log", "audit", "audit.view", "/audit"),
     ("System", "mqtt-settings", "MQTT Broker", "settings", "settings.manage", "/settings/mqtt"),
 )

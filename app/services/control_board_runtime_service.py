@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.camera import Camera
 from app.models.control_board import ControlBoard, PeripheralBehavior, PeripheralPreset, PeripheralPresetSchedule
+from app.models.parking import AccessDecision
 from app.integrations.visionzenith.command_manager import VisionZenithCommandManager
 from app.integrations.visionzenith.protocol import display_settings_frame, idle_frame, led_frame, prepare_text, traffic_light_frame, voice_frame
 from app.integrations.visionzenith.rs485 import get_rs485_body, set_rs485_body
@@ -223,6 +224,51 @@ class PeripheralRuntimeCoordinator:
             except (RuntimeError, ValueError, UnicodeError):
                 return
         self.schedule_restore(camera_id)
+
+    def apply_decision_response(self, decision_id: UUID) -> None:
+        """Translate a durable decision profile into M14 controller commands."""
+        camera_id = None
+        delay = 5
+        with self._session_factory() as db:
+            decision = db.scalar(
+                select(AccessDecision)
+                .options(selectinload(AccessDecision.recognition_event), selectinload(AccessDecision.response_profile))
+                .where(AccessDecision.id == decision_id)
+            )
+            if decision is None or decision.decision == "NO_ACTION":
+                return
+            board = db.scalar(board_query().where(ControlBoard.camera_id == decision.camera_id))
+            profile = decision.response_profile
+            if board is None or profile is None or not profile.enabled:
+                decision.response_status = "NOT_CONFIGURED"
+                db.commit()
+                return
+            try:
+                self._usable(board)
+                plate = decision.recognition_event.plate_text
+                rows = []
+                for row in profile.led_rows[:4]:
+                    if row.get("type") == "CUSTOM":
+                        value = str(row.get("text") or "")
+                    else:
+                        value = {"PLATE": plate, "DECISION": decision.decision, "ACCESS_STATUS": decision.access_status}.get(str(row.get("source") or ""), "")
+                    rows.append(value.replace("{plate}", plate))
+                rows.extend([""] * (4 - len(rows)))
+                for number, value in enumerate(rows, 1):
+                    self._enqueue(board, "decision_led_row", idle_frame(number, value, number, address=board.slave_id), qos=1, metadata={"decision_id": str(decision.id), "row": number})
+                self._enqueue(board, "decision_traffic", traffic_light_frame(red=profile.traffic_state != "GREEN", seconds=profile.traffic_green_seconds, address=board.slave_id), metadata={"decision_id": str(decision.id), "decision": decision.decision})
+                if profile.speaker_enabled and profile.speaker_message:
+                    message = profile.speaker_message.replace("{plate}", plate)
+                    self._enqueue(board, "decision_speaker", voice_frame(message, speed=profile.speaker_speed, volume=profile.speaker_volume, voice=profile.speaker_voice, pitch=profile.speaker_pitch), qos=1, metadata={"decision_id": str(decision.id)})
+                decision.response_status = "QUEUED"
+                camera_id = board.camera_id
+                delay = max(profile.display_seconds, profile.traffic_green_seconds if profile.traffic_state == "GREEN" else 0, 1)
+            except (RuntimeError, ValueError, UnicodeError) as error:
+                decision.response_status = "ERROR"
+                board.last_error = str(error)[:500]
+            db.commit()
+        if camera_id is not None:
+            self.schedule_restore(camera_id, delay_seconds=delay)
 
     def test(self, board_id: UUID, action: str) -> int:
         with self._session_factory() as db:

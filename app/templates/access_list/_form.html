@@ -1,5 +1,11 @@
 {% if error %}<div class="form-alert" role="alert">{{ error }}</div>{% endif %}
 <div class="form-grid">
+    <div class="field-group">
+        <label for="access-profile">Access profile</label>
+        <select id="access-profile" name="access_profile_id"><option value="">No stay profile</option>{% for profile in access_profiles %}<option value="{{ profile.id }}" {% if values.access_profile_id == profile.id|string %}selected{% endif %}>{{ profile.name }}</option>{% endfor %}</select>
+        <small>Controls maximum-stay monitoring in Central only; it is not sent to the camera.</small>
+    </div>
+    <div class="field-group"><label for="max-stay-override">Maximum stay override (minutes)</label><input id="max-stay-override" name="max_stay_minutes_override" type="number" min="1" value="{{ values.max_stay_minutes_override or '' }}" placeholder="Use profile default"></div>
 {% if create_mode and values.recognition_id %}<input type="hidden" name="recognition_id" value="{{ values.recognition_id }}">{% endif %}
 {% if create_mode %}<div class="field-group"><label for="plate">Plate</label><input id="plate" name="plate" maxlength="32" value="{{ values.plate or '' }}" autocomplete="off" {% if values.recognition_prefill %}readonly{% endif %} required>{% if values.recognition_prefill %}<small>Derived from the recognition event.</small>{% endif %}</div><div class="field-group"><label for="site_id">Site</label><select id="site_id" name="site_id" {% if values.recognition_prefill %}disabled{% endif %} required><option value="">Select site</option>{% for site in sites %}<option value="{{ site.id }}" {% if values.site_id == site.id|string %}selected{% endif %}>{{ site.code }} · {{ site.name }}</option>{% endfor %}</select>{% if values.recognition_prefill %}<input type="hidden" name="site_id" value="{{ values.site_id }}"><small>Derived from the recognition event.</small>{% endif %}</div>{% endif %}
 <div class="field-group"><label for="reference_name">Name</label><input id="reference_name" name="reference_name" maxlength="120" value="{{ values.reference_name or '' }}" autocomplete="off"><small>Optional owner name or internal reference.</small></div>

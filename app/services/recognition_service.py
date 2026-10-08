@@ -15,6 +15,7 @@ from app.models.camera import Camera
 from app.models.recognition_event import RecognitionEvent
 from app.models.site import Site
 from app.models.vehicle import Vehicle
+from app.models.parking import AccessDecision
 from app.services.access_list_service import overall_sync_status
 
 
@@ -151,13 +152,13 @@ class RecognitionService:
                 "id": str(event.id),
                 **_access_dict(entry, site),
             }
-            for event, _camera, site, entry in rows
+            for event, _camera, site, entry, _decision in rows
         )
 
     @staticmethod
     def _event_query():
         return (
-            select(RecognitionEvent, Camera, Site, AccessListEntry)
+            select(RecognitionEvent, Camera, Site, AccessListEntry, AccessDecision)
             .join(Camera, Camera.id == RecognitionEvent.camera_id)
             .join(Site, Site.id == RecognitionEvent.site_id)
             .outerjoin(
@@ -171,6 +172,7 @@ class RecognitionService:
                     AccessListEntry.site_id == RecognitionEvent.site_id,
                 ),
             )
+            .outerjoin(AccessDecision, AccessDecision.recognition_event_id == RecognitionEvent.id)
             .options(selectinload(AccessListEntry.camera_syncs))
         )
 
@@ -263,6 +265,7 @@ def _event_dict(
     camera: Camera,
     site: Site,
     access_entry: AccessListEntry | None,
+    decision: AccessDecision | None,
 ) -> dict[str, object]:
     timestamp = event.captured_at or event.received_at
     try:
@@ -275,8 +278,12 @@ def _event_dict(
         "camera": camera.code,
         "camera_name": camera.name,
         "site": site.code,
-        "direction": _operator_direction(event.direction, camera.direction).title(),
-        "direction_code": _operator_direction(event.direction, camera.direction),
+        "direction": (camera.lane_role if camera.lane_role != "UNSPECIFIED" else _operator_direction(None, camera.direction)).title(),
+        "direction_code": camera.lane_role if camera.lane_role != "UNSPECIFIED" else _operator_direction(None, camera.direction),
+        "decision": decision.decision if decision else "PENDING",
+        "decision_label": (decision.decision.title() if decision else "Pending"),
+        "decision_reason": (decision.reason_code.replace("_", " ").title() if decision else "Awaiting evaluation"),
+        "decision_tone": ({"ALLOW": "online", "DENY": "critical", "REVIEW": "warning", "NO_ACTION": "neutral"}.get(decision.decision, "warning") if decision else "warning"),
         "confidence": event.confidence,
         "confidence_display": (
             f"{event.confidence:g}%" if event.confidence is not None else "—"

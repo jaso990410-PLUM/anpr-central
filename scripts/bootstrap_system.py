@@ -33,6 +33,8 @@ DEFAULT_PERMISSIONS = {
     "control_board.view": "View control-board configuration and peripheral behavior",
     "control_board.manage": "Configure control boards, presets, and schedules",
     "control_board.test": "Send explicit control-board hardware test commands",
+    "parking.view": "View parking sessions, decisions, and alerts",
+    "parking.manage": "Manage parking policy, profiles, and alerts",
 }
 
 

@@ -20,7 +20,8 @@
         <header class="panel-header"><div><p class="panel-kicker">Configuration</p><h2 id="camera-general-title">General</h2></div></header>
         <dl class="detail-list">
             <div><dt>Site</dt><dd>{{ camera.site_code }} &middot; {{ camera.site_name }}</dd></div>
-            <div><dt>Direction</dt><dd><span class="status-badge status-badge--{{ camera.direction|lower }}">{{ camera.direction }}</span></dd></div>
+            <div><dt>Lane role</dt><dd><span class="status-badge status-badge--{{ camera.lane_role|lower }}">{{ camera.lane_role }}</span></dd></div>
+            <div><dt>Legacy direction label</dt><dd>{{ camera.direction }}</dd></div>
             <div><dt>Manufacturer</dt><dd>{{ camera.manufacturer or "Not provided" }}</dd></div>
             <div><dt>Model</dt><dd>{{ camera.model or "Not provided" }}</dd></div>
             <div><dt>Serial number</dt><dd class="data-text">{{ camera.serial_number or "Not provided" }}</dd></div>
@@ -44,6 +45,19 @@
         </dl>
     </section>
 </div>
+
+{% if can_manage_cameras %}
+<section class="ops-panel">
+    <header class="panel-header"><div><p class="panel-kicker">Business classification</p><h2>Lane Role</h2></div></header>
+    <form class="inline-filter-form" method="post" action="/cameras/{{ camera.id }}/lane-role">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="field-group"><label for="lane-role">Role</label><select id="lane-role" name="lane_role">
+            {% for role in ['ENTRY', 'EXIT', 'UNSPECIFIED'] %}<option value="{{ role }}" {% if camera.lane_role == role %}selected{% endif %}>{{ role|title }}</option>{% endfor %}
+        </select></div>
+        <button class="button-secondary" type="submit">Save lane role</button>
+    </form>
+</section>
+{% endif %}
 
 <section class="ops-panel camera-topics-panel" aria-labelledby="camera-topics-title">
     <header class="panel-header"><div><p class="panel-kicker">VisionZenith adapter</p><h2 id="camera-topics-title">Native topic namespace</h2></div></header>

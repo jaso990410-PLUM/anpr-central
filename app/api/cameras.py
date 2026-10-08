@@ -252,6 +252,30 @@ def recover_offline_recognitions(
     )
 
 
+@router.post("/{camera_id}/lane-role")
+def update_camera_lane_role(
+    camera_id: UUID,
+    request: Request,
+    lane_role: Annotated[str, Form()],
+    user: User = Depends(require_page_permission("cameras.manage")),
+    _csrf: str = Depends(require_session_csrf),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    service = CameraService(db)
+    camera = _camera_or_404(service, camera_id)
+    try:
+        changed = service.set_lane_role(camera, lane_role)
+    except CameraValidationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    if changed:
+        create_audit_log(db, action="camera.lane_role_update", actor_user_id=user.id,
+            site_id=camera.site_id, entity_type="camera", entity_id=str(camera.id),
+            details={"camera_code": camera.code, "lane_role": camera.lane_role},
+            ip_address=request.client.host if request.client else None)
+    db.commit()
+    return RedirectResponse(f"/cameras/{camera.id}", status_code=303)
+
+
 @router.post("/{camera_id}/access-list-sync/{action}")
 def set_camera_access_list_sync(
     camera_id: UUID,

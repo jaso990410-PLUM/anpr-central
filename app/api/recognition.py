@@ -107,6 +107,7 @@ def recognition_history(
             "live_cursor": service.current_cursor(source=source) or "",
             "live_poll_seconds": settings.live_poll_seconds,
             "can_manage_access_list": user_has_permission(user, "access_list.manage"),
+            "can_view_parking": user_has_permission(user, "parking.view"),
         },
     )
 

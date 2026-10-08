@@ -50,10 +50,10 @@
                 <input id="camera-name" name="name" maxlength="150" value="{{ values.name or '' }}" placeholder="Main Entry" required>
             </div>
             <div class="field-group">
-                <label for="camera-direction">Direction</label>
+                <label for="camera-direction">Lane role</label>
                 <input id="camera-direction" name="direction" list="camera-direction-options" maxlength="20" value="{{ values.direction or 'ENTRY' }}" required>
                 <datalist id="camera-direction-options"><option value="ENTRY"><option value="EXIT"></datalist>
-                <small>ENTRY and EXIT are standard; other operational directions remain supported.</small>
+                <small>This Central role drives entry/exit business decisions; it is independent from the vendor trajectory field.</small>
             </div>
             <div class="field-group">
                 <label for="camera-manufacturer">Manufacturer <span class="muted-text">(optional)</span></label>

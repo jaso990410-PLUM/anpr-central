@@ -229,12 +229,14 @@ class RecognitionWorker:
         session_factory: Callable[[], Session],
         command_manager: VisionZenithCommandManager,
         peripheral_event_callback: Callable[[UUID, str], None] | None = None,
+        business_event_callback: Callable[[UUID], None] | None = None,
         recovery_result_callback: Callable[[str, bool, bool], None] | None = None,
         queue_size: int = RECOGNITION_QUEUE_SIZE,
     ) -> None:
         self._session_factory = session_factory
         self._command_manager = command_manager
         self._peripheral_event_callback = peripheral_event_callback
+        self._business_event_callback = business_event_callback
         self._recovery_result_callback = recovery_result_callback
         self._queue: Queue[RecognitionTask] = Queue(maxsize=queue_size)
         self._stop = Event()
@@ -318,9 +320,11 @@ class RecognitionWorker:
                             board.slave_id if board else 1,
                         )
                         db.commit()
+                        if _created and self._business_event_callback is not None:
+                            self._business_event_callback(action[3])
                         if task.message_type == OFFLINE_RECOGNITION and self._recovery_result_callback is not None:
                             self._recovery_result_callback(task.serial_number, _created, True)
-                        if should_display:
+                        if should_display and self._business_event_callback is None:
                             self._command_manager.enqueue_serial(
                                 camera_id=action[0],
                                 serial_number=task.serial_number,

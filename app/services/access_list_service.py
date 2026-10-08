@@ -12,6 +12,7 @@ from app.models.access_list_camera_sync import AccessListCameraSync
 from app.models.access_list_entry import AccessListEntry
 from app.models.camera import Camera
 from app.models.site import Site
+from app.models.parking import AccessProfile
 from app.models.vehicle import Vehicle
 
 
@@ -131,6 +132,7 @@ class AccessListService:
         if self.db.scalar(select(AccessListEntry).where(AccessListEntry.vehicle_id == vehicle.id, AccessListEntry.site_id == site.id)):
             raise AccessListValidationError("This plate already has an access entry for the selected site")
         clean = validate_entry_values(site, **values)
+        self._validate_profile(site.id, clean.get("access_profile_id"))
         entry = AccessListEntry(vehicle=vehicle, site=site, **clean)
         self.db.add(entry)
         self.db.flush()
@@ -145,6 +147,7 @@ class AccessListService:
         **values: object,
     ) -> dict[str, object]:
         clean = validate_entry_values(entry.site, **values)
+        self._validate_profile(entry.site_id, clean.get("access_profile_id"))
         clean_reference_name = normalize_reference_name(reference_name)
         before = entry_summary(entry)
         entry.vehicle.reference_name = clean_reference_name
@@ -192,6 +195,13 @@ class AccessListService:
             raise AccessListValidationError("Select a valid active site")
         return site
 
+    def _validate_profile(self, site_id: UUID, profile_id: object) -> None:
+        if profile_id is None:
+            return
+        profile = self.db.get(AccessProfile, profile_id)
+        if profile is None or profile.site_id != site_id or not profile.enabled:
+            raise AccessListValidationError("Select an enabled access profile for this site")
+
 
 def normalize_plate(value: str) -> str:
     plate = (value or "").strip().upper()
@@ -218,6 +228,8 @@ def validate_entry_values(
     daily_start: object = None,
     daily_end: object = None,
     camera_comment: object = None,
+    access_profile_id: object = None,
+    max_stay_minutes_override: object = None,
 ) -> dict[str, object]:
     normalized_type = str(list_type).strip().upper()
     if normalized_type not in LIST_TYPES:
@@ -239,6 +251,20 @@ def validate_entry_values(
     comment = str(camera_comment or "").strip()
     if len(comment) > 16:
         raise AccessListValidationError("Camera remark must be at most 16 characters")
+    profile_id = None
+    if str(access_profile_id or "").strip():
+        try:
+            profile_id = UUID(str(access_profile_id))
+        except ValueError as error:
+            raise AccessListValidationError("Select a valid access profile") from error
+    override = None
+    if str(max_stay_minutes_override or "").strip():
+        try:
+            override = int(str(max_stay_minutes_override))
+        except ValueError as error:
+            raise AccessListValidationError("Maximum stay override must be whole minutes") from error
+        if override <= 0:
+            raise AccessListValidationError("Maximum stay override must be greater than zero")
     return {
         "list_type": normalized_type,
         "enabled": bool(enabled),
@@ -248,6 +274,8 @@ def validate_entry_values(
         "daily_start": window_start,
         "daily_end": window_end,
         "camera_comment": comment or None,
+        "access_profile_id": profile_id,
+        "max_stay_minutes_override": override,
     }
 
 

@@ -1,0 +1,164 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, time, timezone
+from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.models.access_list_entry import AccessListEntry
+from app.models.camera import Camera
+from app.models.parking import AccessDecision, SitePolicy
+from app.models.recognition_event import RecognitionEvent
+from app.models.site import Site
+from app.models.vehicle import Vehicle
+
+
+ACCESS_STATUSES = {
+    "WHITELIST_ACTIVE", "BLACKLIST_ACTIVE", "WHITELIST_DISABLED", "BLACKLIST_DISABLED",
+    "WHITELIST_NOT_YET_VALID", "BLACKLIST_NOT_YET_VALID", "WHITELIST_EXPIRED",
+    "BLACKLIST_EXPIRED", "WHITELIST_OUTSIDE_WINDOW", "BLACKLIST_OUTSIDE_WINDOW", "NOT_LISTED",
+}
+
+
+@dataclass(frozen=True)
+class DecisionContext:
+    event: RecognitionEvent
+    camera: Camera
+    site: Site
+    vehicle: Vehicle | None
+    access_entry: AccessListEntry | None
+    access_status: str
+    policy: SitePolicy | None
+    evaluated_at: datetime
+
+
+@dataclass(frozen=True)
+class PolicyResult:
+    decision: str
+    reason_code: str
+    response_profile_id: UUID | None
+
+
+class AccessStatusResolver:
+    @staticmethod
+    def resolve(entry: AccessListEntry | None, *, at: datetime, timezone_name: str) -> str:
+        if entry is None:
+            return "NOT_LISTED"
+        prefix = "WHITELIST" if entry.list_type == "ALLOW" else "BLACKLIST"
+        utc_at = _as_utc(at)
+        if not entry.enabled:
+            return f"{prefix}_DISABLED"
+        if entry.valid_from is not None and utc_at < _as_utc(entry.valid_from):
+            return f"{prefix}_NOT_YET_VALID"
+        if entry.valid_until is not None and utc_at > _as_utc(entry.valid_until):
+            return f"{prefix}_EXPIRED"
+        if entry.daily_window_enabled and entry.daily_start is not None and entry.daily_end is not None:
+            local_time = utc_at.astimezone(_zone(timezone_name)).time().replace(tzinfo=None)
+            if not _inside_window(local_time, entry.daily_start, entry.daily_end):
+                return f"{prefix}_OUTSIDE_WINDOW"
+        return f"{prefix}_ACTIVE"
+
+
+class ResidentialPolicy:
+    @staticmethod
+    def evaluate(context: DecisionContext) -> PolicyResult:
+        policy = context.policy
+        if context.camera.lane_role not in {"ENTRY", "EXIT"}:
+            return PolicyResult("NO_ACTION", "LANE_ROLE_UNSPECIFIED", None)
+        if policy is not None and policy.operating_mode != "RESIDENTIAL":
+            return PolicyResult("NO_ACTION", "OPERATING_MODE_UNSUPPORTED", None)
+
+        status = context.access_status
+        lane = context.camera.lane_role
+        unknown_entry = policy.unknown_entry_policy if policy else "DENY"
+        exit_mode = policy.exit_mode if policy else "FREE_EXIT"
+        exit_blacklist = policy.exit_blacklist_policy if policy else "DENY"
+
+        if lane == "EXIT" and exit_mode == "FREE_EXIT":
+            if status == "BLACKLIST_ACTIVE":
+                decision, reason = exit_blacklist, f"EXIT_BLACKLIST_{exit_blacklist}"
+            else:
+                decision, reason = "ALLOW", "FREE_EXIT"
+        elif status == "WHITELIST_ACTIVE":
+            decision, reason = "ALLOW", "ACTIVE_WHITELIST"
+        elif status == "BLACKLIST_ACTIVE":
+            decision, reason = "DENY", "ACTIVE_BLACKLIST"
+        elif status.startswith("WHITELIST_"):
+            decision, reason = "DENY", status
+        else:
+            decision, reason = unknown_entry, "UNKNOWN_OR_INACTIVE_ACCESS"
+
+        profile_id = None
+        if policy:
+            profile_id = {
+                "ALLOW": policy.allow_response_profile_id,
+                "DENY": policy.deny_response_profile_id,
+                "REVIEW": policy.review_response_profile_id,
+            }.get(decision)
+        return PolicyResult(decision, reason, profile_id)
+
+
+class DecisionContextBuilder:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def build(self, event: RecognitionEvent) -> DecisionContext:
+        camera = self.db.get(Camera, event.camera_id)
+        site = self.db.get(Site, event.site_id)
+        if camera is None or site is None:
+            raise ValueError("Recognition camera/site is unavailable")
+        vehicle = self.db.scalar(select(Vehicle).where(Vehicle.plate_text == event.plate_text))
+        entry = None
+        if vehicle is not None:
+            entry = self.db.scalar(select(AccessListEntry).where(
+                AccessListEntry.vehicle_id == vehicle.id, AccessListEntry.site_id == site.id
+            ))
+        evaluated_at = _as_utc(event.captured_at or event.received_at)
+        status = AccessStatusResolver.resolve(entry, at=evaluated_at, timezone_name=site.timezone)
+        policy = self.db.scalar(select(SitePolicy).where(SitePolicy.site_id == site.id))
+        return DecisionContext(event, camera, site, vehicle, entry, status, policy, evaluated_at)
+
+
+def create_access_decision(db: Session, context: DecisionContext) -> AccessDecision:
+    existing = db.scalar(select(AccessDecision).where(AccessDecision.recognition_event_id == context.event.id))
+    if existing is not None:
+        return existing
+    if context.event.source == "OFFLINE_RECOVERY":
+        result = PolicyResult("NO_ACTION", "HISTORICAL_RECONCILIATION", None)
+        response_status = "NOT_APPLICABLE"
+    else:
+        result = ResidentialPolicy.evaluate(context)
+        response_status = "PENDING" if result.decision != "NO_ACTION" and result.response_profile_id else "NOT_CONFIGURED"
+    decision = AccessDecision(
+        recognition_event_id=context.event.id, site_id=context.site.id, camera_id=context.camera.id,
+        vehicle_id=context.vehicle.id if context.vehicle else None,
+        access_entry_id=context.access_entry.id if context.access_entry else None,
+        access_status=context.access_status, decision=result.decision, reason_code=result.reason_code,
+        policy_type=context.policy.operating_mode if context.policy else "RESIDENTIAL",
+        policy_version=context.policy.policy_version if context.policy else 1,
+        evaluated_at=context.evaluated_at, response_profile_id=result.response_profile_id,
+        response_status=response_status,
+    )
+    db.add(decision)
+    db.flush()
+    return decision
+
+
+def _inside_window(value: time, start: time, end: time) -> bool:
+    if start <= end:
+        return start <= value <= end
+    return value >= start or value <= end
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+def _zone(name: str):
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        return timezone.utc

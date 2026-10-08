@@ -46,6 +46,10 @@ class Camera(Base):
         nullable=False,
     )
 
+    lane_role: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="UNSPECIFIED", server_default=text("'UNSPECIFIED'")
+    )
+
     manufacturer: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,

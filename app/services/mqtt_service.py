@@ -51,6 +51,7 @@ from app.services.camera_presence_service import (
 )
 from app.services.camera_service import CREDENTIALS_REVOKED
 from app.services.control_board_runtime_service import PeripheralRuntimeCoordinator
+from app.services.parking_event_service import ParkingEventCoordinator
 
 
 logger = logging.getLogger(__name__)
@@ -326,10 +327,15 @@ class MqttHeartbeatService:
                 command_manager=self._command_manager,
                 is_connected=lambda: self.is_connected,
             )
+            self._parking_events = ParkingEventCoordinator(
+                self._session_factory,
+                action_callback=self._control_board_runtime.apply_decision_response,
+            )
             self._recognition_worker = RecognitionWorker(
                 session_factory=self._session_factory,
                 command_manager=self._command_manager,
                 peripheral_event_callback=self._control_board_runtime.handle_recognition,
+                business_event_callback=self._parking_events.process_event,
                 recovery_result_callback=self._offline_recovery.record_message,
             )
             self._recognition_worker.start()

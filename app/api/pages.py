@@ -16,6 +16,7 @@ from app.models.user import User
 from app.services.dashboard_service import get_dashboard_summary
 from app.services.mqtt_service import mqtt_heartbeat_service
 from app.services.recognition_service import RecognitionService
+from app.services.parking_service import ParkingService
 from app.services.shell_service import build_navigation, role_label
 from app.web import templates
 
@@ -39,6 +40,7 @@ def dashboard(
 ) -> HTMLResponse:
     raw_session_token = request.cookies[settings.session_cookie_name]
     can_view_events = user_has_permission(user, "events.view")
+    can_view_parking = user_has_permission(user, "parking.view")
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -53,6 +55,9 @@ def dashboard(
             "can_view_events": can_view_events,
             "can_manage_access_list": user_has_permission(user, "access_list.manage"),
             "can_view_cameras": user_has_permission(user, "cameras.view"),
+            "can_view_parking": can_view_parking,
+            "parking_summary": ParkingService(db).summary() if can_view_parking else None,
+            "overstay_alerts": ParkingService(db).alerts() if can_view_parking else (),
             "latest_recognition": (
                 RecognitionService(db).latest() if can_view_events else None
             ),
