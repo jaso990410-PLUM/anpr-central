@@ -1,0 +1,44 @@
+{% set editing = profile is defined and profile %}
+{% set minutes = profile.default_max_stay_minutes if editing else none %}
+{% if minutes and minutes % 1440 == 0 %}{% set stay_value = minutes // 1440 %}{% set stay_unit = 'DAYS' %}{% elif minutes and minutes % 60 == 0 %}{% set stay_value = minutes // 60 %}{% set stay_unit = 'HOURS' %}{% else %}{% set stay_value = minutes or 1 %}{% set stay_unit = 'MINUTES' %}{% endif %}
+<form class="staff-user-form access-profile-form" method="post" action="{{ form_action }}" data-access-profile-form>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <script type="application/json" data-site-exit-rules>{{ site_exit_rules|tojson }}</script>
+
+  <fieldset class="profile-form-section"><legend>Basic Profile</legend><p>Identify the vehicle category and the site where it applies.</p>
+    <div class="form-grid">
+      <div class="field-group"><label>Site</label><select name="site_id" required data-profile-site>{% for site in sites %}<option value="{{ site.id }}" {% if editing and site.id == profile.site_id %}selected{% endif %}>{{ site.code }} &middot; {{ site.name }}</option>{% endfor %}</select></div>
+      <div class="field-group"><label>Name</label><input name="name" maxlength="100" value="{{ profile.name if editing else '' }}" placeholder="e.g. Visitor" required></div>
+      <div class="field-group form-grid__wide"><label>Description</label><input name="description" maxlength="500" value="{{ profile.description or '' if editing else '' }}" placeholder="e.g. Short-term visitor vehicles"></div>
+    </div>
+    <label class="setting-toggle"><input type="checkbox" name="enabled" value="true" {% if not editing or profile.enabled %}checked{% endif %}><span><strong>Profile enabled</strong><small>Disabled profiles are not assigned to new parking sessions.</small></span></label>
+  </fieldset>
+
+  <fieldset class="profile-form-section"><legend>Stay Rules</legend><p>Set how long this vehicle category may remain on site.</p>
+    <div class="stay-limit-choice" role="radiogroup" aria-label="Maximum stay type">
+      <label><input type="radio" name="stay_limit_mode" value="UNLIMITED" {% if not minutes %}checked{% endif %}> Unlimited</label>
+      <label><input type="radio" name="stay_limit_mode" value="LIMITED" {% if minutes %}checked{% endif %}> Limited</label>
+    </div>
+    <div class="stay-limit-input" data-stay-limited>
+      <div class="field-group"><label>Maximum stay</label><div class="compound-input"><input name="maximum_stay_value" type="number" min="1" step="1" value="{{ stay_value }}"><select name="maximum_stay_unit"><option value="MINUTES" {% if stay_unit == 'MINUTES' %}selected{% endif %}>Minutes</option><option value="HOURS" {% if stay_unit == 'HOURS' %}selected{% endif %}>Hours</option><option value="DAYS" {% if stay_unit == 'DAYS' %}selected{% endif %}>Days</option></select></div></div>
+    </div>
+    <label class="setting-toggle" data-overstay-monitor><input type="checkbox" name="overstay_monitoring_enabled" value="true" {% if minutes and profile.overstay_monitoring_enabled %}checked{% endif %}><span><strong>Monitor overstays</strong><small>Create an overstay alert after the maximum stay is reached.</small></span></label>
+    <p class="panel-note" data-unlimited-note hidden>Not applicable: an unlimited stay cannot become overdue.</p>
+  </fieldset>
+
+  <fieldset class="profile-form-section"><legend>Exit Enforcement</legend><p>Choose Central's decision for each possible exit condition.</p>
+    <div class="exit-policy-matrix" role="group" aria-label="Exit enforcement conditions">
+      <div class="exit-policy-matrix__header"><span>Condition</span><span>Action</span></div>
+      {% for field, condition, label, fallback in [('normal_exit_policy','normal','Normal exit','USE_SITE_POLICY'),('expired_exit_policy','expired','Exit after access expiry','USE_SITE_POLICY'),('overstay_exit_policy','overstay','Exit after maximum stay','REVIEW'),('blacklist_exit_policy','blacklist','Exit while blacklisted','DENY')] %}
+      {% set selected = profile[field] if editing else fallback %}
+      <div class="exit-policy-matrix__row" data-exit-condition="{{ condition }}"><div><strong>{{ label }}</strong>{% if condition == 'overstay' %}<small data-overstay-applicability>Applies after the stay limit and grace period.</small>{% endif %}</div><div><select name="{{ field }}" data-policy-select data-condition="{{ condition }}"><option value="USE_SITE_POLICY" {% if selected == 'USE_SITE_POLICY' %}selected{% endif %}>Use site policy</option><option value="ALLOW" {% if selected == 'ALLOW' %}selected{% endif %}>Allow</option><option value="REVIEW" {% if selected == 'REVIEW' %}selected{% endif %}>Require operator review</option><option value="DENY" {% if selected == 'DENY' %}selected{% endif %}>Deny</option></select><small data-inherited-rule></small></div></div>
+      {% endfor %}
+      <div class="exit-policy-matrix__row exit-policy-matrix__row--grace" data-grace-row><div><strong>Overstay enforcement grace</strong><small>The stricter overstay exit rule starts only after this period.</small></div><div class="compound-input"><input name="overstay_exit_grace_minutes" type="number" min="0" step="1" value="{{ profile.overstay_exit_grace_minutes if editing else 0 }}"><span>minutes</span></div></div>
+    </div>
+    <div class="alert alert--neutral"><strong>Architecture status:</strong> these settings determine Central's decision only. Physical barrier execution is not yet implemented.</div>
+    <div class="alert alert--warning" data-restrictive-warning hidden><strong>Manual release required:</strong> Review or Deny may hold a vehicle once physical barrier control is enabled. Ensure a staffed release procedure is available.</div>
+  </fieldset>
+
+  <section class="effective-behavior" aria-live="polite"><p class="panel-kicker">Effective behavior</p><h3>Profile summary</h3><dl class="detail-list"><div><dt>Maximum stay</dt><dd data-summary-stay></dd></div><div><dt>Overstay monitoring</dt><dd data-summary-monitoring></dd></div><div><dt>Normal exit</dt><dd data-summary-policy="normal"></dd></div><div><dt>Access expired</dt><dd data-summary-policy="expired"></dd></div><div><dt>Maximum stay exceeded</dt><dd data-summary-policy="overstay"></dd></div><div><dt>Active blacklist</dt><dd data-summary-policy="blacklist"></dd></div></dl></section>
+  <div class="form-actions"><button class="button-primary button-primary--compact" type="submit">{{ submit_label }}</button></div>
+</form>

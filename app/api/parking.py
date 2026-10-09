@@ -116,13 +116,13 @@ def save_response_profile(profile_id: UUID, request: Request, name: Annotated[st
 
 @router.get("/access-profiles", response_class=HTMLResponse)
 def profiles(request: Request, user: User = Depends(require_page_permission("parking.manage")), db: Session = Depends(get_db)):
-    service = ParkingService(db); context = _context(request, db, user, "access-profiles"); context.update({"profiles": service.profiles(), "sites": service.sites()})
+    service = ParkingService(db); context = _context(request, db, user, "access-profiles"); context.update({"profiles": service.profiles(), "sites": service.sites(), "site_exit_rules": service.site_exit_rules()})
     return templates.TemplateResponse(request=request, name="parking/profiles.html", context=context)
 
 
 @router.post("/access-profiles")
-def save_profile(request: Request, site_id: Annotated[UUID, Form()], name: Annotated[str, Form()], description: Annotated[str, Form()] = "", default_max_stay_minutes: Annotated[str, Form()] = "", overstay_monitoring_enabled: Annotated[str | None, Form()] = None, enabled: Annotated[str | None, Form()] = None, normal_exit_policy: Annotated[str, Form()] = "USE_SITE_POLICY", expired_exit_policy: Annotated[str, Form()] = "USE_SITE_POLICY", overstay_exit_policy: Annotated[str, Form()] = "REVIEW", blacklist_exit_policy: Annotated[str, Form()] = "DENY", overstay_exit_grace_minutes: Annotated[str, Form()] = "0", user: User = Depends(require_page_permission("parking.manage")), _csrf: str = Depends(require_session_csrf), db: Session = Depends(get_db)):
-    try: profile = ParkingService(db).save_profile(profile_id=None, site_id=site_id, name=name, description=description, max_stay=default_max_stay_minutes, monitoring=overstay_monitoring_enabled == "true", enabled=enabled == "true", normal_exit_policy=normal_exit_policy, expired_exit_policy=expired_exit_policy, overstay_exit_policy=overstay_exit_policy, blacklist_exit_policy=blacklist_exit_policy, overstay_exit_grace_minutes=overstay_exit_grace_minutes)
+def save_profile(request: Request, site_id: Annotated[UUID, Form()], name: Annotated[str, Form()], description: Annotated[str, Form()] = "", default_max_stay_minutes: Annotated[str, Form()] = "", stay_limit_mode: Annotated[str, Form()] = "", maximum_stay_value: Annotated[str, Form()] = "", maximum_stay_unit: Annotated[str, Form()] = "MINUTES", overstay_monitoring_enabled: Annotated[str | None, Form()] = None, enabled: Annotated[str | None, Form()] = None, normal_exit_policy: Annotated[str, Form()] = "USE_SITE_POLICY", expired_exit_policy: Annotated[str, Form()] = "USE_SITE_POLICY", overstay_exit_policy: Annotated[str, Form()] = "REVIEW", blacklist_exit_policy: Annotated[str, Form()] = "DENY", overstay_exit_grace_minutes: Annotated[str, Form()] = "0", user: User = Depends(require_page_permission("parking.manage")), _csrf: str = Depends(require_session_csrf), db: Session = Depends(get_db)):
+    try: profile = ParkingService(db).save_profile(profile_id=None, site_id=site_id, name=name, description=description, max_stay=_maximum_stay_minutes(default_max_stay_minutes, stay_limit_mode, maximum_stay_value, maximum_stay_unit), monitoring=overstay_monitoring_enabled == "true", enabled=enabled == "true", normal_exit_policy=normal_exit_policy, expired_exit_policy=expired_exit_policy, overstay_exit_policy=overstay_exit_policy, blacklist_exit_policy=blacklist_exit_policy, overstay_exit_grace_minutes=overstay_exit_grace_minutes)
     except ParkingValidationError as error: raise HTTPException(400, str(error)) from error
     create_audit_log(db, action="parking.access_profile_create", actor_user_id=user.id, site_id=site_id, entity_type="access_profile", entity_id=str(profile.id), details={"name": profile.name}, ip_address=request.client.host if request.client else None)
     db.commit(); return RedirectResponse("/access-profiles", status_code=303)
@@ -133,13 +133,13 @@ def edit_profile_page(profile_id: UUID, request: Request, user: User = Depends(r
     from app.models.parking import AccessProfile
     profile = db.get(AccessProfile, profile_id)
     if profile is None: raise HTTPException(404, "Access profile not found")
-    context = _context(request, db, user, "access-profiles"); context.update({"profile": profile, "sites": ParkingService(db).sites()})
+    service = ParkingService(db); context = _context(request, db, user, "access-profiles"); context.update({"profile": profile, "sites": service.sites(), "site_exit_rules": service.site_exit_rules()})
     return templates.TemplateResponse(request=request, name="parking/profile_edit.html", context=context)
 
 
 @router.post("/access-profiles/{profile_id}")
-def update_profile(profile_id: UUID, request: Request, site_id: Annotated[UUID, Form()], name: Annotated[str, Form()], description: Annotated[str, Form()] = "", default_max_stay_minutes: Annotated[str, Form()] = "", overstay_monitoring_enabled: Annotated[str | None, Form()] = None, enabled: Annotated[str | None, Form()] = None, normal_exit_policy: Annotated[str, Form()] = "USE_SITE_POLICY", expired_exit_policy: Annotated[str, Form()] = "USE_SITE_POLICY", overstay_exit_policy: Annotated[str, Form()] = "REVIEW", blacklist_exit_policy: Annotated[str, Form()] = "DENY", overstay_exit_grace_minutes: Annotated[str, Form()] = "0", user: User = Depends(require_page_permission("parking.manage")), _csrf: str = Depends(require_session_csrf), db: Session = Depends(get_db)):
-    try: profile = ParkingService(db).save_profile(profile_id=profile_id, site_id=site_id, name=name, description=description, max_stay=default_max_stay_minutes, monitoring=overstay_monitoring_enabled == "true", enabled=enabled == "true", normal_exit_policy=normal_exit_policy, expired_exit_policy=expired_exit_policy, overstay_exit_policy=overstay_exit_policy, blacklist_exit_policy=blacklist_exit_policy, overstay_exit_grace_minutes=overstay_exit_grace_minutes)
+def update_profile(profile_id: UUID, request: Request, site_id: Annotated[UUID, Form()], name: Annotated[str, Form()], description: Annotated[str, Form()] = "", default_max_stay_minutes: Annotated[str, Form()] = "", stay_limit_mode: Annotated[str, Form()] = "", maximum_stay_value: Annotated[str, Form()] = "", maximum_stay_unit: Annotated[str, Form()] = "MINUTES", overstay_monitoring_enabled: Annotated[str | None, Form()] = None, enabled: Annotated[str | None, Form()] = None, normal_exit_policy: Annotated[str, Form()] = "USE_SITE_POLICY", expired_exit_policy: Annotated[str, Form()] = "USE_SITE_POLICY", overstay_exit_policy: Annotated[str, Form()] = "REVIEW", blacklist_exit_policy: Annotated[str, Form()] = "DENY", overstay_exit_grace_minutes: Annotated[str, Form()] = "0", user: User = Depends(require_page_permission("parking.manage")), _csrf: str = Depends(require_session_csrf), db: Session = Depends(get_db)):
+    try: profile = ParkingService(db).save_profile(profile_id=profile_id, site_id=site_id, name=name, description=description, max_stay=_maximum_stay_minutes(default_max_stay_minutes, stay_limit_mode, maximum_stay_value, maximum_stay_unit), monitoring=overstay_monitoring_enabled == "true", enabled=enabled == "true", normal_exit_policy=normal_exit_policy, expired_exit_policy=expired_exit_policy, overstay_exit_policy=overstay_exit_policy, blacklist_exit_policy=blacklist_exit_policy, overstay_exit_grace_minutes=overstay_exit_grace_minutes)
     except ParkingValidationError as error: raise HTTPException(400, str(error)) from error
     create_audit_log(db, action="parking.access_profile_update", actor_user_id=user.id, site_id=profile.site_id, entity_type="access_profile", entity_id=str(profile.id), details={"name": profile.name, "enabled": profile.enabled}, ip_address=request.client.host if request.client else None)
     db.commit(); return RedirectResponse("/access-profiles", status_code=303)
@@ -171,5 +171,22 @@ def resolve_review(item_id: UUID, request: Request, resolution_note: Annotated[s
     if item is None: raise HTTPException(404, "Review item not found")
     create_audit_log(db, action="parking.review_resolve", actor_user_id=user.id, site_id=item.site_id, entity_type="parking_review_item", entity_id=str(item.id), details={"note": item.resolution_note}, ip_address=request.client.host if request.client else None)
     db.commit(); return RedirectResponse("/parking/reviews", status_code=303)
+
+
+def _maximum_stay_minutes(legacy_minutes: str, mode: str, value: str, unit: str) -> str:
+    if not mode:
+        return legacy_minutes
+    if mode == "UNLIMITED":
+        return ""
+    if mode != "LIMITED" or unit not in {"MINUTES", "HOURS", "DAYS"}:
+        raise ParkingValidationError("Select a valid maximum-stay option.")
+    try:
+        amount = int(value)
+    except ValueError as error:
+        raise ParkingValidationError("Enter a whole-number maximum stay.") from error
+    if amount <= 0:
+        raise ParkingValidationError("Maximum stay must be greater than zero.")
+    return str(amount * {"MINUTES": 1, "HOURS": 60, "DAYS": 1440}[unit])
+
 
 __all__ = ["router"]

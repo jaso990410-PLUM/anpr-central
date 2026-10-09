@@ -111,3 +111,36 @@ def test_response_profile_standard_sources_are_dropdown_backed_and_validated(cli
         "row_3_type": "CUSTOM", "row_3_value": "", "row_4_type": "CUSTOM", "row_4_value": "",
     })
     assert response.status_code == 400
+
+
+def test_access_profile_editor_uses_friendly_stay_units_and_policy_matrix(client, db):
+    create_user(db, ("parking.manage",)); site = seed(db); login(client)
+    page = client.get("/access-profiles")
+    assert page.status_code == 200
+    for text in ("Basic Profile", "Stay Rules", "Exit Enforcement", "Effective behavior", "Exit after access expiry"):
+        assert text in page.text
+    assert 'name="stay_limit_mode"' in page.text
+    assert 'name="maximum_stay_unit"' in page.text
+    response = client.post("/access-profiles", data={
+        "csrf_token": csrf(page.text), "site_id": str(site.id), "name": "Four Hour Visitor",
+        "stay_limit_mode": "LIMITED", "maximum_stay_value": "4", "maximum_stay_unit": "HOURS",
+        "overstay_monitoring_enabled": "true", "enabled": "true", "normal_exit_policy": "ALLOW",
+        "expired_exit_policy": "REVIEW", "overstay_exit_policy": "REVIEW", "blacklist_exit_policy": "DENY",
+        "overstay_exit_grace_minutes": "15",
+    })
+    assert response.status_code == 303
+    profile = db.scalar(select(AccessProfile).where(AccessProfile.name == "Four Hour Visitor"))
+    assert profile.default_max_stay_minutes == 240 and profile.overstay_monitoring_enabled is True
+
+
+def test_unlimited_profile_explicitly_disables_overstay_monitoring(client, db):
+    create_user(db, ("parking.manage",)); site = seed(db); login(client)
+    page = client.get("/access-profiles")
+    response = client.post("/access-profiles", data={
+        "csrf_token": csrf(page.text), "site_id": str(site.id), "name": "Resident Unlimited",
+        "stay_limit_mode": "UNLIMITED", "maximum_stay_value": "99", "maximum_stay_unit": "DAYS",
+        "overstay_monitoring_enabled": "true", "enabled": "true",
+    })
+    assert response.status_code == 303
+    profile = db.scalar(select(AccessProfile).where(AccessProfile.name == "Resident Unlimited"))
+    assert profile.default_max_stay_minutes is None and profile.overstay_monitoring_enabled is False

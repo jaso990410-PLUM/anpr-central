@@ -62,6 +62,23 @@ class ParkingService:
             query = query.where(AccessProfile.site_id == site_id)
         return tuple(self.db.scalars(query).all())
 
+    def site_exit_rules(self) -> dict[str, dict[str, str]]:
+        rules: dict[str, dict[str, str]] = {}
+        for site in self.sites():
+            policy = self.policy(site.id)
+            if policy is None:
+                rules[str(site.id)] = {condition: "REVIEW" for condition in ("normal", "expired", "overstay", "blacklist")}
+            elif policy.exit_mode == "FREE_EXIT":
+                rules[str(site.id)] = {
+                    "normal": "ALLOW", "expired": "ALLOW", "overstay": "ALLOW",
+                    "blacklist": policy.exit_blacklist_policy,
+                }
+            else:
+                rules[str(site.id)] = {
+                    "normal": "ALLOW", "expired": "DENY", "overstay": "ALLOW", "blacklist": "DENY",
+                }
+        return rules
+
     def save_profile(self, *, profile_id: UUID | None, site_id: UUID, name: str, description: str, max_stay: str, monitoring: bool, enabled: bool,
                      normal_exit_policy: str = "USE_SITE_POLICY", expired_exit_policy: str = "USE_SITE_POLICY",
                      overstay_exit_policy: str = "REVIEW", blacklist_exit_policy: str = "DENY",
@@ -90,7 +107,7 @@ class ParkingService:
             raise ParkingValidationError("Access profile was not found.")
         profile.site_id = site_id
         profile.name = name.strip(); profile.description = description.strip() or None
-        profile.default_max_stay_minutes = minutes; profile.overstay_monitoring_enabled = monitoring; profile.enabled = enabled
+        profile.default_max_stay_minutes = minutes; profile.overstay_monitoring_enabled = monitoring and minutes is not None; profile.enabled = enabled
         profile.normal_exit_policy = normal_exit_policy; profile.expired_exit_policy = expired_exit_policy
         profile.overstay_exit_policy = overstay_exit_policy; profile.blacklist_exit_policy = blacklist_exit_policy
         profile.overstay_exit_grace_minutes = grace
