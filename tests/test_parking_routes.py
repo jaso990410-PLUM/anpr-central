@@ -95,3 +95,19 @@ def test_policy_simulator_has_no_operational_side_effects(client, db):
     assert "Denied" in response.text and "Not Listed" in response.text
     assert db.scalar(select(AccessDecision)) is None
     assert db.scalar(select(ParkingSession)) is None
+
+
+def test_response_profile_standard_sources_are_dropdown_backed_and_validated(client, db):
+    create_user(db, ("parking.manage",)); seed(db); login(client)
+    profile = db.scalar(select(DecisionResponseProfile).where(DecisionResponseProfile.response_kind == "ALLOW"))
+    page = client.get(f"/parking/response-profiles/{profile.id}")
+    assert page.status_code == 200
+    assert '<select name="row_1_value"' in page.text
+    assert 'value="PLATE"' in page.text and 'value="ACCESS_STATUS"' in page.text
+    response = client.post(f"/parking/response-profiles/{profile.id}", data={
+        "csrf_token": csrf(page.text), "name": "Allow", "display_seconds": "5",
+        "traffic_state": "GREEN", "traffic_green_seconds": "5", "row_1_type": "STANDARD",
+        "row_1_value": "UNSUPPORTED_FIELD", "row_2_type": "CUSTOM", "row_2_value": "Welcome",
+        "row_3_type": "CUSTOM", "row_3_value": "", "row_4_type": "CUSTOM", "row_4_value": "",
+    })
+    assert response.status_code == 400

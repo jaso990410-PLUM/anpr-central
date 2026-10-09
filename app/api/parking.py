@@ -17,7 +17,7 @@ from sqlalchemy import select
 from app.services.audit_service import create_audit_log
 from app.services.dashboard_service import get_dashboard_summary
 from app.services.mqtt_service import mqtt_heartbeat_service
-from app.services.parking_service import ParkingService, ParkingValidationError
+from app.services.parking_service import DECISION_RESPONSE_STANDARD_SOURCES, ParkingService, ParkingValidationError
 from app.services.parking_review_service import ParkingReviewService
 from app.services.shell_service import build_navigation, role_label
 from app.web import templates
@@ -99,7 +99,7 @@ def response_profile_page(profile_id: UUID, request: Request, user: User = Depen
     from app.models.parking import DecisionResponseProfile
     profile = db.get(DecisionResponseProfile, profile_id)
     if profile is None: raise HTTPException(404, "Response profile not found")
-    context = _context(request, db, user, "parking-policy"); context["profile"] = profile
+    context = _context(request, db, user, "parking-policy"); context.update({"profile": profile, "standard_sources": sorted(DECISION_RESPONSE_STANDARD_SOURCES)})
     return templates.TemplateResponse(request=request, name="parking/response_profile.html", context=context)
 
 

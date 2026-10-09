@@ -19,6 +19,9 @@ class ParkingValidationError(ValueError):
     pass
 
 
+DECISION_RESPONSE_STANDARD_SOURCES = frozenset({"BLANK", "PLATE", "DECISION", "ACCESS_STATUS"})
+
+
 class ParkingService:
     def __init__(self, db: Session):
         self.db = db
@@ -105,6 +108,14 @@ class ParkingService:
             raise ParkingValidationError("Response profile was not found.")
         if not name.strip() or traffic_state not in {"RED", "GREEN"} or not 1 <= display_seconds <= 300 or not 1 <= green_seconds <= 300:
             raise ParkingValidationError("Enter valid response profile settings.")
+        for row in rows[:4]:
+            row_type = str(row.get("type", "")).upper()
+            if row_type not in {"STANDARD", "CUSTOM"}:
+                raise ParkingValidationError("LED row type must be Standard or Custom.")
+            if row_type == "STANDARD" and row.get("source") not in DECISION_RESPONSE_STANDARD_SOURCES:
+                raise ParkingValidationError("Select a supported standard LED source.")
+            if row_type == "CUSTOM" and any(ord(character) < 32 for character in str(row.get("text", ""))):
+                raise ParkingValidationError("Custom LED text must remain on one line.")
         profile.name = name.strip(); profile.display_seconds = display_seconds; profile.traffic_state = traffic_state
         profile.traffic_green_seconds = green_seconds; profile.speaker_enabled = speaker_enabled
         profile.speaker_message = speaker_message.strip()[:250] or "{plate}"; profile.led_rows = rows[:4]
