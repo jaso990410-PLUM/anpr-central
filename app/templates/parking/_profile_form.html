@@ -31,9 +31,17 @@
       <div class="exit-policy-matrix__header"><span>Condition</span><span>Action</span></div>
       {% for field, condition, label, fallback in [('normal_exit_policy','normal','Normal exit','USE_SITE_POLICY'),('expired_exit_policy','expired','Exit after access expiry','USE_SITE_POLICY'),('overstay_exit_policy','overstay','Exit after maximum stay','REVIEW'),('blacklist_exit_policy','blacklist','Exit while blacklisted','DENY')] %}
       {% set selected = profile[field] if editing else fallback %}
-      <div class="exit-policy-matrix__row" data-exit-condition="{{ condition }}"><div><strong>{{ label }}</strong>{% if condition == 'overstay' %}<small data-overstay-applicability>Applies after the stay limit and grace period.</small>{% endif %}</div><div><select name="{{ field }}" data-policy-select data-condition="{{ condition }}"><option value="USE_SITE_POLICY" {% if selected == 'USE_SITE_POLICY' %}selected{% endif %}>Use site policy</option><option value="ALLOW" {% if selected == 'ALLOW' %}selected{% endif %}>Allow</option><option value="REVIEW" {% if selected == 'REVIEW' %}selected{% endif %}>Require operator review</option><option value="DENY" {% if selected == 'DENY' %}selected{% endif %}>Deny</option></select><small data-inherited-rule></small></div></div>
+      <div class="exit-policy-matrix__row" data-exit-condition="{{ condition }}">
+        <div><strong>{{ label }}</strong>{% if condition == 'overstay' %}<small data-overstay-applicability>Applies after the stay limit and grace period.</small>{% endif %}</div>
+        <div><select name="{{ field }}" data-policy-select data-condition="{{ condition }}">
+          <option value="USE_SITE_POLICY" {% if selected == 'USE_SITE_POLICY' %}selected{% endif %}>Use site policy</option>
+          <option value="ALLOW" {% if selected == 'ALLOW' %}selected{% endif %}>Allow</option>
+          <option value="REVIEW" {% if selected == 'REVIEW' %}selected{% endif %}>Require operator review</option>
+          <option value="DENY" {% if selected == 'DENY' %}selected{% endif %}>Deny</option>
+        </select><small data-inherited-rule></small></div>
+      </div>
+      {% if condition == 'overstay' %}<div class="exit-policy-matrix__row exit-policy-matrix__row--grace" data-grace-row><div><strong>Overstay enforcement grace</strong><small>The stricter overstay exit rule starts only after this period.</small></div><div class="compound-input"><input name="overstay_exit_grace_minutes" type="number" min="0" step="1" value="{{ profile.overstay_exit_grace_minutes if editing else 0 }}"><span>minutes</span></div></div>{% endif %}
       {% endfor %}
-      <div class="exit-policy-matrix__row exit-policy-matrix__row--grace" data-grace-row><div><strong>Overstay enforcement grace</strong><small>The stricter overstay exit rule starts only after this period.</small></div><div class="compound-input"><input name="overstay_exit_grace_minutes" type="number" min="0" step="1" value="{{ profile.overstay_exit_grace_minutes if editing else 0 }}"><span>minutes</span></div></div>
     </div>
     <div class="alert alert--neutral"><strong>Architecture status:</strong> these settings determine Central's decision only. Physical barrier execution is not yet implemented.</div>
     <div class="alert alert--warning" data-restrictive-warning hidden><strong>Manual release required:</strong> Review or Deny may hold a vehicle once physical barrier control is enabled. Ensure a staffed release procedure is available.</div>
