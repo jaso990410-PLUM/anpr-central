@@ -30,6 +30,7 @@ _PERMISSION_NAVIGATION = (
     ("Monitoring", "recognition", "Recognition History", "recognition", "events.view", "/recognition"),
     ("Parking", "parking-on-site", "On-Site Vehicles", "vehicles", "parking.view", "/parking/on-site"),
     ("Parking", "parking-history", "Stay History", "audit", "parking.view", "/parking/history"),
+    ("Parking", "parking-reviews", "Exit Reviews", "audit", "parking.view", "/parking/reviews"),
     ("Parking", "access-profiles", "Access Profiles", "access-list", "parking.manage", "/access-profiles"),
     ("Parking", "parking-policy", "Access Policy", "settings", "parking.manage", "/parking/policy"),
     ("Monitoring", "audit", "Audit Log", "audit", "audit.view", "/audit"),

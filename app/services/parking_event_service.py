@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.models.recognition_event import RecognitionEvent
 from app.services.parking_policy_service import DecisionContextBuilder, create_access_decision
 from app.services.parking_session_service import ParkingSessionService
+from app.services.parking_review_service import ParkingReviewService
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,8 @@ class ParkingEventCoordinator:
                 return
             context = DecisionContextBuilder(db).build(event)
             decision = create_access_decision(db, context)
-            ParkingSessionService(db).apply(context, decision.decision)
+            parking_session = ParkingSessionService(db).apply(context, decision.decision)
+            ParkingReviewService(db).apply_exit_result(context, decision, parking_session)
             decision_id = decision.id
             db.commit()
             is_live = event.source == "LIVE"

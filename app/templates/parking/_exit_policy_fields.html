@@ -1,0 +1,11 @@
+<fieldset class="form-section">
+  <legend>Exit enforcement</legend>
+  <p class="field-hint">Central decision rules only. Physical barrier execution is not implemented in this milestone.</p>
+  <div class="form-grid">
+  {% for field, label, fallback in [('normal_exit_policy','Normal exit','USE_SITE_POLICY'),('expired_exit_policy','Expired access exit','USE_SITE_POLICY'),('overstay_exit_policy','Overstay exit','REVIEW'),('blacklist_exit_policy','Blacklisted exit','DENY')] %}
+    {% set selected = profile[field] if profile is defined and profile else fallback %}
+    <div class="field-group"><label>{{ label }}</label><select name="{{ field }}">{% for value, text in [('USE_SITE_POLICY','Use site policy'),('ALLOW','Allow'),('REVIEW','Require operator review'),('DENY','Deny')] %}<option value="{{ value }}" {% if selected == value %}selected{% endif %}>{{ text }}</option>{% endfor %}</select></div>
+  {% endfor %}
+    <div class="field-group"><label>Overstay exit grace (minutes)</label><input name="overstay_exit_grace_minutes" type="number" min="0" value="{{ profile.overstay_exit_grace_minutes if profile is defined and profile else 0 }}"><small>The exact boundary remains within grace.</small></div>
+  </div>
+</fieldset>

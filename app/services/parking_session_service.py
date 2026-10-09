@@ -40,15 +40,20 @@ class ParkingSessionService:
                 access_profile_id=profile.id if profile else None,
                 entry_recognition_id=context.event.id, status="OPEN", entered_at=context.evaluated_at,
                 max_stay_minutes=max_stay, overstay_due_at=due, source=context.event.source,
+                effective_normal_exit_policy=profile.normal_exit_policy if profile else "USE_SITE_POLICY",
+                effective_expired_exit_policy=profile.expired_exit_policy if profile else "USE_SITE_POLICY",
+                effective_overstay_exit_policy=profile.overstay_exit_policy if profile else "USE_SITE_POLICY",
+                effective_blacklist_exit_policy=profile.blacklist_exit_policy if profile else "USE_SITE_POLICY",
+                effective_overstay_exit_grace_minutes=profile.overstay_exit_grace_minutes if profile else 0,
             )
             self.db.add(session)
             self.db.flush()
             return session
-        if context.event.source != "OFFLINE_RECOVERY" and decision != "ALLOW":
-            return active
         if active is None:
             self._issue(context, "EXIT_WITHOUT_ENTRY", "No active stay was found")
             return None
+        if context.event.source != "OFFLINE_RECOVERY" and decision != "ALLOW":
+            return active
         if context.evaluated_at < _utc(active.entered_at):
             self._issue(context, "AMBIGUOUS_CHRONOLOGY", f"Exit predates session {active.id}")
             return active

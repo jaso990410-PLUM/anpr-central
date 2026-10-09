@@ -22,7 +22,7 @@ from app.models.user_session import UserSession
 from app.models.vehicle import Vehicle
 from app.models.parking import (
     AccessDecision, AccessProfile, DecisionResponseProfile, OverstayAlert,
-    ParkingSession, ParkingSessionIssue, SitePolicy,
+    ParkingReviewItem, ParkingSession, ParkingSessionIssue, SitePolicy,
 )
 
 __all__ = [
@@ -50,6 +50,7 @@ __all__ = [
     "AccessProfile",
     "DecisionResponseProfile",
     "OverstayAlert",
+    "ParkingReviewItem",
     "ParkingSession",
     "ParkingSessionIssue",
     "SitePolicy",

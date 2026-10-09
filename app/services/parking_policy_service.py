@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models.access_list_entry import AccessListEntry
 from app.models.camera import Camera
-from app.models.parking import AccessDecision, SitePolicy
+from app.models.parking import AccessDecision, AccessProfile, ParkingSession, SitePolicy
 from app.models.recognition_event import RecognitionEvent
 from app.models.site import Site
 from app.models.vehicle import Vehicle
@@ -33,6 +33,8 @@ class DecisionContext:
     access_status: str
     policy: SitePolicy | None
     evaluated_at: datetime
+    active_session: ParkingSession | None = None
+    current_profile: AccessProfile | None = None
 
 
 @dataclass(frozen=True)
@@ -40,6 +42,9 @@ class PolicyResult:
     decision: str
     reason_code: str
     response_profile_id: UUID | None
+    exit_policy_source: str | None = None
+    barrier_intent: str = "NONE"
+    exit_condition: str | None = None
 
 
 class AccessStatusResolver:
@@ -77,11 +82,10 @@ class ResidentialPolicy:
         exit_mode = policy.exit_mode if policy else "FREE_EXIT"
         exit_blacklist = policy.exit_blacklist_policy if policy else "DENY"
 
-        if lane == "EXIT" and exit_mode == "FREE_EXIT":
-            if status == "BLACKLIST_ACTIVE":
-                decision, reason = exit_blacklist, f"EXIT_BLACKLIST_{exit_blacklist}"
-            else:
-                decision, reason = "ALLOW", "FREE_EXIT"
+        exit_source = None
+        exit_condition = None
+        if lane == "EXIT":
+            decision, reason, exit_source, exit_condition = ProfileExitPolicyResolver.evaluate(context)
         elif status == "WHITELIST_ACTIVE":
             decision, reason = "ALLOW", "ACTIVE_WHITELIST"
         elif status == "BLACKLIST_ACTIVE":
@@ -98,7 +102,71 @@ class ResidentialPolicy:
                 "DENY": policy.deny_response_profile_id,
                 "REVIEW": policy.review_response_profile_id,
             }.get(decision)
-        return PolicyResult(decision, reason, profile_id)
+        intent = {"ALLOW": "OPEN", "DENY": "HOLD", "REVIEW": "OPERATOR_REVIEW"}.get(decision, "NONE")
+        return PolicyResult(decision, reason, profile_id, exit_source, intent, exit_condition)
+
+
+class ProfileExitPolicyResolver:
+    """Resolve exit policy from the entry-time snapshot before current configuration."""
+
+    @staticmethod
+    def evaluate(context: DecisionContext) -> tuple[str, str, str, str]:
+        status = context.access_status
+        session = context.active_session
+        profile = context.current_profile
+
+        if status == "BLACKLIST_ACTIVE":
+            condition = "BLACKLIST"
+        elif session is not None and session.overstay_due_at is not None:
+            enforcement_at = _as_utc(session.overstay_due_at) + timedelta(
+                minutes=session.effective_overstay_exit_grace_minutes
+            )
+            condition = "OVERSTAY" if context.evaluated_at > enforcement_at else (
+                "EXPIRED" if status == "WHITELIST_EXPIRED" else "NORMAL"
+            )
+        elif status == "WHITELIST_EXPIRED":
+            condition = "EXPIRED"
+        else:
+            condition = "NORMAL"
+
+        field = {
+            "NORMAL": "normal_exit_policy",
+            "EXPIRED": "expired_exit_policy",
+            "OVERSTAY": "overstay_exit_policy",
+            "BLACKLIST": "blacklist_exit_policy",
+        }[condition]
+        if session is not None:
+            rule = getattr(session, f"effective_{field}", "USE_SITE_POLICY")
+            source = "SESSION_PROFILE_SNAPSHOT"
+        elif profile is not None and profile.enabled:
+            rule = getattr(profile, field, "USE_SITE_POLICY")
+            source = "CURRENT_ACCESS_PROFILE"
+        else:
+            rule = "USE_SITE_POLICY"
+            source = "SITE_POLICY_FALLBACK"
+
+        if rule in {"ALLOW", "REVIEW", "DENY"}:
+            return rule, f"PROFILE_{condition}_EXIT_{rule}", source, condition
+        decision, reason = ProfileExitPolicyResolver._site_fallback(context)
+        return decision, reason, "SITE_POLICY_FALLBACK", condition
+
+    @staticmethod
+    def _site_fallback(context: DecisionContext) -> tuple[str, str]:
+        policy = context.policy
+        if policy is None:
+            return "REVIEW", "EXIT_POLICY_UNAVAILABLE"
+        if policy.exit_mode == "FREE_EXIT":
+            if context.access_status == "BLACKLIST_ACTIVE":
+                decision = policy.exit_blacklist_policy
+                return decision, f"EXIT_BLACKLIST_{decision}"
+            return "ALLOW", "FREE_EXIT"
+        if context.access_status == "WHITELIST_ACTIVE":
+            return "ALLOW", "ACTIVE_WHITELIST"
+        if context.access_status == "BLACKLIST_ACTIVE":
+            return "DENY", "ACTIVE_BLACKLIST"
+        if context.access_status.startswith("WHITELIST_"):
+            return "DENY", context.access_status
+        return policy.unknown_entry_policy, "UNKNOWN_OR_INACTIVE_ACCESS"
 
 
 class DecisionContextBuilder:
@@ -119,7 +187,16 @@ class DecisionContextBuilder:
         evaluated_at = _as_utc(event.captured_at or event.received_at)
         status = AccessStatusResolver.resolve(entry, at=evaluated_at, timezone_name=site.timezone)
         policy = self.db.scalar(select(SitePolicy).where(SitePolicy.site_id == site.id))
-        return DecisionContext(event, camera, site, vehicle, entry, status, policy, evaluated_at)
+        active = None
+        profile = None
+        if vehicle is not None:
+            active = self.db.scalar(select(ParkingSession).where(
+                ParkingSession.site_id == site.id, ParkingSession.vehicle_id == vehicle.id,
+                ParkingSession.status.in_(("OPEN", "OVERSTAY")),
+            ))
+        if entry is not None and entry.access_profile_id is not None:
+            profile = self.db.get(AccessProfile, entry.access_profile_id)
+        return DecisionContext(event, camera, site, vehicle, entry, status, policy, evaluated_at, active, profile)
 
 
 def create_access_decision(db: Session, context: DecisionContext) -> AccessDecision:
@@ -127,7 +204,7 @@ def create_access_decision(db: Session, context: DecisionContext) -> AccessDecis
     if existing is not None:
         return existing
     if context.event.source == "OFFLINE_RECOVERY":
-        result = PolicyResult("NO_ACTION", "HISTORICAL_RECONCILIATION", None)
+        result = PolicyResult("NO_ACTION", "HISTORICAL_RECONCILIATION", None, None, "NONE", None)
         response_status = "NOT_APPLICABLE"
     else:
         result = ResidentialPolicy.evaluate(context)
@@ -140,7 +217,8 @@ def create_access_decision(db: Session, context: DecisionContext) -> AccessDecis
         policy_type=context.policy.operating_mode if context.policy else "RESIDENTIAL",
         policy_version=context.policy.policy_version if context.policy else 1,
         evaluated_at=context.evaluated_at, response_profile_id=result.response_profile_id,
-        response_status=response_status,
+        response_status=response_status, exit_policy_source=result.exit_policy_source,
+        barrier_intent=result.barrier_intent, physical_execution="NOT_IMPLEMENTED",
     )
     db.add(decision)
     db.flush()

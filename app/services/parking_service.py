@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
-from app.models.parking import AccessProfile, DecisionResponseProfile, OverstayAlert, ParkingSession, ParkingSessionIssue, SitePolicy
+from app.models.parking import AccessProfile, DecisionResponseProfile, OverstayAlert, ParkingReviewItem, ParkingSession, ParkingSessionIssue, SitePolicy
 from app.models.site import Site
 from app.models.camera import Camera
 from app.models.vehicle import Vehicle
@@ -50,7 +50,8 @@ class ParkingService:
         on_site = self.db.scalar(select(func.count()).select_from(ParkingSession).where(ParkingSession.status.in_(("OPEN", "OVERSTAY")))) or 0
         overstays = self.db.scalar(select(func.count()).select_from(ParkingSession).where(ParkingSession.status == "OVERSTAY")) or 0
         issues = self.db.scalar(select(func.count()).select_from(ParkingSessionIssue).where(ParkingSessionIssue.status == "OPEN")) or 0
-        return {"on_site": on_site, "overstays": overstays, "issues": issues}
+        reviews = self.db.scalar(select(func.count()).select_from(ParkingReviewItem).where(ParkingReviewItem.status.in_(("OPEN", "ACKNOWLEDGED")))) or 0
+        return {"on_site": on_site, "overstays": overstays, "issues": issues, "reviews": reviews}
 
     def profiles(self, site_id: UUID | None = None):
         query = select(AccessProfile).order_by(AccessProfile.name)
@@ -58,7 +59,10 @@ class ParkingService:
             query = query.where(AccessProfile.site_id == site_id)
         return tuple(self.db.scalars(query).all())
 
-    def save_profile(self, *, profile_id: UUID | None, site_id: UUID, name: str, description: str, max_stay: str, monitoring: bool, enabled: bool):
+    def save_profile(self, *, profile_id: UUID | None, site_id: UUID, name: str, description: str, max_stay: str, monitoring: bool, enabled: bool,
+                     normal_exit_policy: str = "USE_SITE_POLICY", expired_exit_policy: str = "USE_SITE_POLICY",
+                     overstay_exit_policy: str = "REVIEW", blacklist_exit_policy: str = "DENY",
+                     overstay_exit_grace_minutes: str = "0"):
         site = self.db.get(Site, site_id)
         if site is None or not name.strip():
             raise ParkingValidationError("Select a site and enter a profile name.")
@@ -68,12 +72,25 @@ class ParkingService:
             raise ParkingValidationError("Maximum stay must be whole minutes.") from error
         if minutes is not None and minutes <= 0:
             raise ParkingValidationError("Maximum stay must be greater than zero.")
+        allowed = {"USE_SITE_POLICY", "ALLOW", "REVIEW", "DENY"}
+        rules = (normal_exit_policy, expired_exit_policy, overstay_exit_policy, blacklist_exit_policy)
+        if any(rule not in allowed for rule in rules):
+            raise ParkingValidationError("Select valid exit enforcement rules.")
+        try:
+            grace = int(overstay_exit_grace_minutes or "0")
+        except ValueError as error:
+            raise ParkingValidationError("Exit grace must be whole minutes.") from error
+        if grace < 0:
+            raise ParkingValidationError("Exit grace cannot be negative.")
         profile = self.db.get(AccessProfile, profile_id) if profile_id else AccessProfile(site_id=site_id)
         if profile is None:
             raise ParkingValidationError("Access profile was not found.")
         profile.site_id = site_id
         profile.name = name.strip(); profile.description = description.strip() or None
         profile.default_max_stay_minutes = minutes; profile.overstay_monitoring_enabled = monitoring; profile.enabled = enabled
+        profile.normal_exit_policy = normal_exit_policy; profile.expired_exit_policy = expired_exit_policy
+        profile.overstay_exit_policy = overstay_exit_policy; profile.blacklist_exit_policy = blacklist_exit_policy
+        profile.overstay_exit_grace_minutes = grace
         self.db.add(profile); self.db.flush(); return profile
 
     def policy(self, site_id: UUID):
@@ -121,11 +138,33 @@ class ParkingService:
         policy = self.policy(site.id)
         status = AccessStatusResolver.resolve(entry, at=evaluated_at, timezone_name=site.timezone)
         event = type("SimulationEvent", (), {"source": "LIVE"})()
-        context = DecisionContext(event, camera, site, vehicle, entry, status, policy, evaluated_at)
-        result = ResidentialPolicy.evaluate(context)
+        active = self.db.scalar(select(ParkingSession).where(ParkingSession.site_id == site.id,
+            ParkingSession.vehicle_id == vehicle.id, ParkingSession.status.in_(("OPEN", "OVERSTAY")))) if vehicle else None
         profile = self.db.get(AccessProfile, entry.access_profile_id) if entry and entry.access_profile_id else None
+        context = DecisionContext(event, camera, site, vehicle, entry, status, policy, evaluated_at, active, profile)
+        result = ResidentialPolicy.evaluate(context)
         maximum = entry.max_stay_minutes_override if entry and entry.max_stay_minutes_override is not None else (profile.default_max_stay_minutes if profile and profile.enabled else None)
-        return {"plate": normalized, "lane": camera.lane_role.title(), "access_status": status.replace("_", " ").title(), "decision": {"ALLOW": "Granted", "DENY": "Denied", "REVIEW": "Review Required", "NO_ACTION": "No Action"}[result.decision], "reason": result.reason_code.replace("_", " ").title(), "stay_rule": f"{maximum} minutes" if maximum else "Unlimited"}
+        return {"plate": normalized, "lane": camera.lane_role.title(), "access_status": status.replace("_", " ").title(), "decision": {"ALLOW": "Granted", "DENY": "Denied", "REVIEW": "Review Required", "NO_ACTION": "No Action"}[result.decision], "reason": result.reason_code.replace("_", " ").title(), "stay_rule": f"{maximum} minutes" if maximum else "Unlimited", "exit_policy_source": (result.exit_policy_source or "Not applicable").replace("_", " ").title(), "barrier_intent": result.barrier_intent.replace("_", " ").title()}
+
+    def reviews(self, *, site_id: UUID | None = None, status: str = "", item_type: str = "", plate: str = "", page: int = 1, page_size: int = 50):
+        query = select(ParkingReviewItem).options(joinedload(ParkingReviewItem.site), joinedload(ParkingReviewItem.vehicle), joinedload(ParkingReviewItem.parking_session))
+        count_query = select(func.count()).select_from(ParkingReviewItem)
+        filters = []
+        if site_id: filters.append(ParkingReviewItem.site_id == site_id)
+        if status in {"OPEN", "ACKNOWLEDGED", "RESOLVED"}: filters.append(ParkingReviewItem.status == status)
+        if item_type: filters.append(ParkingReviewItem.item_type == item_type)
+        if plate.strip():
+            query = query.join(Vehicle, Vehicle.id == ParkingReviewItem.vehicle_id)
+            count_query = count_query.join(Vehicle, Vehicle.id == ParkingReviewItem.vehicle_id)
+            filters.append(Vehicle.plate_text.ilike(f"%{plate.strip().upper()}%"))
+        query = query.where(*filters); count_query = count_query.where(*filters)
+        total = self.db.scalar(count_query) or 0
+        rows = self.db.scalars(query.order_by(ParkingReviewItem.last_triggered_at.desc()).offset((page - 1) * page_size).limit(page_size)).unique().all()
+        return {"items": tuple({"id": item.id, "plate": item.vehicle.plate_text if item.vehicle else "Unknown", "site": item.site.code,
+            "type": item.item_type.replace("_", " ").title(), "type_code": item.item_type, "reason": item.reason_code.replace("_", " ").title(),
+            "status": item.status, "attempts": item.attempt_count, "last_triggered": _display(item.last_triggered_at, item.site.timezone),
+            "session_id": item.parking_session_id} for item in rows), "total": total, "page": page,
+            "page_count": max(1, (total + page_size - 1) // page_size)}
 
     @staticmethod
     def _session(item):
@@ -139,7 +178,10 @@ class ParkingService:
             "site": item.site.code, "status": item.status, "entered": _display(item.entered_at, tz),
             "exited": _display(item.exited_at, tz) if item.exited_at else None, "duration": f"{duration // 60}h {duration % 60}m",
             "profile": item.access_profile.name if item.access_profile else "No profile", "max_stay": item.max_stay_minutes,
-            "overstay_due": _display(item.overstay_due_at, tz) if item.overstay_due_at else None, "source": item.source}
+            "overstay_due": _display(item.overstay_due_at, tz) if item.overstay_due_at else None, "source": item.source,
+            "normal_exit_policy": item.effective_normal_exit_policy, "expired_exit_policy": item.effective_expired_exit_policy,
+            "overstay_exit_policy": item.effective_overstay_exit_policy, "blacklist_exit_policy": item.effective_blacklist_exit_policy,
+            "overstay_exit_grace_minutes": item.effective_overstay_exit_grace_minutes}
 
 
 def _display(value, timezone_name):

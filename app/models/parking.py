@@ -61,6 +61,11 @@ class AccessProfile(Base):
     description: Mapped[str | None] = mapped_column(Text)
     default_max_stay_minutes: Mapped[int | None] = mapped_column(Integer)
     overstay_monitoring_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    normal_exit_policy: Mapped[str] = mapped_column(String(20), default="USE_SITE_POLICY", nullable=False)
+    expired_exit_policy: Mapped[str] = mapped_column(String(20), default="USE_SITE_POLICY", nullable=False)
+    overstay_exit_policy: Mapped[str] = mapped_column(String(20), default="REVIEW", nullable=False)
+    blacklist_exit_policy: Mapped[str] = mapped_column(String(20), default="DENY", nullable=False)
+    overstay_exit_grace_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -84,6 +89,9 @@ class AccessDecision(Base):
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     response_profile_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("decision_response_profiles.id", ondelete="SET NULL"))
     response_status: Mapped[str] = mapped_column(String(32), default="PENDING", nullable=False)
+    exit_policy_source: Mapped[str | None] = mapped_column(String(40))
+    barrier_intent: Mapped[str] = mapped_column(String(24), default="NONE", nullable=False)
+    physical_execution: Mapped[str] = mapped_column(String(24), default="NOT_IMPLEMENTED", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     recognition_event = relationship("RecognitionEvent")
@@ -109,6 +117,11 @@ class ParkingSession(Base):
     max_stay_minutes: Mapped[int | None] = mapped_column(Integer)
     overstay_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     overstay_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    effective_normal_exit_policy: Mapped[str] = mapped_column(String(20), default="USE_SITE_POLICY", nullable=False)
+    effective_expired_exit_policy: Mapped[str] = mapped_column(String(20), default="USE_SITE_POLICY", nullable=False)
+    effective_overstay_exit_policy: Mapped[str] = mapped_column(String(20), default="REVIEW", nullable=False)
+    effective_blacklist_exit_policy: Mapped[str] = mapped_column(String(20), default="DENY", nullable=False)
+    effective_overstay_exit_grace_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     source: Mapped[str] = mapped_column(String(24), default="LIVE", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -147,3 +160,36 @@ class OverstayAlert(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     parking_session = relationship("ParkingSession")
+
+
+class ParkingReviewItem(Base):
+    __tablename__ = "parking_review_items"
+    __table_args__ = (
+        Index("ix_parking_review_items_site_status", "site_id", "status"),
+        Index("ix_parking_review_items_session_type", "parking_session_id", "item_type"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    site_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("sites.id", ondelete="CASCADE"), index=True)
+    vehicle_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("vehicles.id", ondelete="SET NULL"), index=True)
+    parking_session_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("parking_sessions.id", ondelete="SET NULL"), index=True)
+    recognition_event_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("recognition_events.id", ondelete="CASCADE"))
+    access_decision_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("access_decisions.id", ondelete="CASCADE"))
+    item_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="OPEN", nullable=False)
+    first_triggered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_triggered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    acknowledged_by_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    resolution_note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    site = relationship("Site")
+    vehicle = relationship("Vehicle")
+    parking_session = relationship("ParkingSession")
+    access_decision = relationship("AccessDecision")

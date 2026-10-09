@@ -76,10 +76,13 @@ def test_parking_pages_render_and_profile_mutation_requires_csrf(client, db):
     policy = client.get("/parking/policy")
     assert policy.status_code == 200 and "Residential Decision Rules" in policy.text
     assert client.post("/access-profiles", data={"site_id": str(site.id), "name": "Visitor", "enabled": "true"}).status_code == 403
-    response = client.post("/access-profiles", data={"csrf_token": csrf(policy.text), "site_id": str(site.id), "name": "Visitor", "description": "Short stay", "default_max_stay_minutes": "120", "overstay_monitoring_enabled": "true", "enabled": "true"})
+    response = client.post("/access-profiles", data={"csrf_token": csrf(policy.text), "site_id": str(site.id), "name": "Visitor", "description": "Short stay", "default_max_stay_minutes": "120", "overstay_monitoring_enabled": "true", "enabled": "true", "normal_exit_policy": "ALLOW", "expired_exit_policy": "REVIEW", "overstay_exit_policy": "DENY", "blacklist_exit_policy": "DENY", "overstay_exit_grace_minutes": "15"})
     assert response.status_code == 303
     profile = db.scalar(select(AccessProfile).where(AccessProfile.name == "Visitor"))
     assert profile is not None and profile.default_max_stay_minutes == 120
+    assert (profile.normal_exit_policy, profile.overstay_exit_policy, profile.overstay_exit_grace_minutes) == ("ALLOW", "DENY", 15)
+    reviews = client.get("/parking/reviews")
+    assert reviews.status_code == 200 and "Exit Reviews" in reviews.text
 
 
 def test_policy_simulator_has_no_operational_side_effects(client, db):

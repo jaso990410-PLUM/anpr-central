@@ -87,6 +87,7 @@
     <article class="metric-card"><span class="metric-label">Vehicles on site</span><strong class="metric-value">{{ parking_summary.on_site }}</strong><a class="table-link" href="/parking/on-site">Open occupancy</a></article>
     <article class="metric-card"><span class="metric-label">Overstays</span><strong class="metric-value">{{ parking_summary.overstays }}</strong><span class="metric-status"><span class="status-dot status-dot--warning"></span>Active alerts</span></article>
     <article class="metric-card"><span class="metric-label">Reconciliation issues</span><strong class="metric-value">{{ parking_summary.issues }}</strong><a class="table-link" href="/parking/history">Review stays</a></article>
+    <article class="metric-card"><span class="metric-label">Exit reviews</span><strong class="metric-value">{{ parking_summary.reviews }}</strong><a class="table-link" href="/parking/reviews">Open review queue</a></article>
 </section>
 {% if overstay_alerts %}<section class="ops-panel"><header class="panel-header"><div><p class="panel-kicker">Stay monitoring</p><h2>Overstay attention</h2></div></header>{% for alert in overstay_alerts[:5] %}<div class="alert alert--warning"><strong>{{ alert.plate }}</strong> &middot; {{ alert.detected }} &middot; {{ alert.status }}</div>{% endfor %}</section>{% endif %}
 {% endif %}

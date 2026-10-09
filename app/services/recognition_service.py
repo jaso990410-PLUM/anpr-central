@@ -283,6 +283,9 @@ def _event_dict(
         "decision": decision.decision if decision else "PENDING",
         "decision_label": (decision.decision.title() if decision else "Pending"),
         "decision_reason": (decision.reason_code.replace("_", " ").title() if decision else "Awaiting evaluation"),
+        "exit_policy_source": (decision.exit_policy_source.replace("_", " ").title() if decision and decision.exit_policy_source else None),
+        "barrier_intent": (decision.barrier_intent.replace("_", " ").title() if decision else "None"),
+        "physical_execution": (decision.physical_execution.replace("_", " ").title() if decision else "Not Implemented"),
         "decision_tone": ({"ALLOW": "online", "DENY": "critical", "REVIEW": "warning", "NO_ACTION": "neutral"}.get(decision.decision, "warning") if decision else "warning"),
         "confidence": event.confidence,
         "confidence_display": (
