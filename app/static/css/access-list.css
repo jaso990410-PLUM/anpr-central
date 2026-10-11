@@ -1,0 +1,136 @@
+.access-entry-form {
+    display: grid;
+    gap: 1rem;
+}
+
+.access-record-section {
+    min-width: 0;
+    margin: 0;
+    padding: 1.1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: rgba(8, 13, 21, 0.28);
+}
+
+.access-record-section legend {
+    padding: 0 0.45rem;
+    color: var(--secondary);
+    font-family: var(--technical);
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.section-description {
+    margin: 0 0 1rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.field-label {
+    display: block;
+    margin-bottom: 0.45rem;
+    color: var(--text-primary);
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.access-override-choice,
+.access-classification-choice {
+    margin-bottom: 0.65rem;
+}
+
+.access-override-choice label:has(input:checked) span {
+    border-color: rgba(47, 168, 255, 0.65);
+    color: var(--text-primary);
+    background: rgba(47, 168, 255, 0.12);
+}
+
+.access-custom-stay {
+    display: grid;
+    grid-template-columns: minmax(8rem, 1fr) minmax(8rem, 0.7fr);
+    gap: 0.65rem;
+    max-width: 24rem;
+}
+
+.access-custom-stay input,
+.access-custom-stay select {
+    width: 100%;
+}
+
+.access-profile-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(10rem, 1fr));
+    gap: 1px;
+    margin-top: 1rem;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--border);
+}
+
+.access-profile-summary > div {
+    display: grid;
+    gap: 0.25rem;
+    min-width: 0;
+    padding: 0.75rem 0.85rem;
+    background: var(--bg-deep);
+}
+
+.access-profile-summary span {
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.access-profile-summary strong {
+    color: var(--text-primary);
+    font-size: 0.88rem;
+}
+
+.datetime-control {
+    display: grid;
+    grid-template-columns: minmax(12rem, 1fr) auto;
+    gap: 0.65rem;
+    align-items: center;
+}
+
+.button-secondary--compact {
+    min-height: 2.75rem;
+    padding: 0.55rem 0.8rem;
+    white-space: nowrap;
+}
+
+.daily-window-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.access-entry-form [hidden] {
+    display: none !important;
+}
+
+@media (max-width: 900px) {
+    .access-profile-summary {
+        grid-template-columns: repeat(2, minmax(9rem, 1fr));
+    }
+
+    .datetime-control,
+    .daily-window-fields {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 560px) {
+    .access-record-section {
+        padding: 0.9rem;
+    }
+
+    .access-profile-summary,
+    .access-custom-stay {
+        grid-template-columns: 1fr;
+    }
+}

@@ -1,4 +1,6 @@
 {% extends "base_app.html" %}
 {% block title %}New Access Record &middot; ANPR Central{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', path='/css/access-list.css') }}">{% endblock %}
 {% block content %}<header class="page-header"><div><p class="eyebrow">Central access control</p><h1>Add Access Record</h1><p>Create the authoritative desired state; eligible cameras synchronize in the background.</p></div><a class="button-quiet" href="/access-list">Back to access list</a></header>
 <section class="ops-panel form-panel"><header class="panel-header"><div><p class="panel-kicker">Vehicle entitlement</p><h2>Central access</h2></div></header><form method="post" action="/access-list/new"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% set create_mode = true %}{% include "access_list/_form.html" %}<div class="form-actions"><button class="button-primary" type="submit">Create access record</button></div></form></section>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='/js/access-list.js') }}" defer></script>{% endblock %}

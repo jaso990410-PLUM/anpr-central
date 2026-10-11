@@ -1,20 +1,120 @@
 {% if error %}<div class="form-alert" role="alert">{{ error }}</div>{% endif %}
-<div class="form-grid">
-    <div class="field-group">
-        <label for="access-profile">Access profile</label>
-        <select id="access-profile" name="access_profile_id"><option value="">No stay profile</option>{% for profile in access_profiles %}<option value="{{ profile.id }}" {% if values.access_profile_id == profile.id|string %}selected{% endif %}>{{ profile.name }}</option>{% endfor %}</select>
-        <small>Controls maximum-stay monitoring in Central only; it is not sent to the camera.</small>
-    </div>
-    <div class="field-group"><label for="max-stay-override">Maximum stay override (minutes)</label><input id="max-stay-override" name="max_stay_minutes_override" type="number" min="1" value="{{ values.max_stay_minutes_override or '' }}" placeholder="Use profile default"></div>
-{% if create_mode and values.recognition_id %}<input type="hidden" name="recognition_id" value="{{ values.recognition_id }}">{% endif %}
-{% if create_mode %}<div class="field-group"><label for="plate">Plate</label><input id="plate" name="plate" maxlength="32" value="{{ values.plate or '' }}" autocomplete="off" {% if values.recognition_prefill %}readonly{% endif %} required>{% if values.recognition_prefill %}<small>Derived from the recognition event.</small>{% endif %}</div><div class="field-group"><label for="site_id">Site</label><select id="site_id" name="site_id" {% if values.recognition_prefill %}disabled{% endif %} required><option value="">Select site</option>{% for site in sites %}<option value="{{ site.id }}" {% if values.site_id == site.id|string %}selected{% endif %}>{{ site.code }} · {{ site.name }}</option>{% endfor %}</select>{% if values.recognition_prefill %}<input type="hidden" name="site_id" value="{{ values.site_id }}"><small>Derived from the recognition event.</small>{% endif %}</div>{% endif %}
-<div class="field-group"><label for="reference_name">Name</label><input id="reference_name" name="reference_name" maxlength="120" value="{{ values.reference_name or '' }}" autocomplete="off"><small>Optional owner name or internal reference.</small></div>
-<div class="field-group"><label for="list_type">Access classification</label><select id="list_type" name="list_type" required><option value="ALLOW" {% if values.list_type == 'ALLOW' %}selected{% endif %}>Whitelist</option><option value="BLOCK" {% if values.list_type == 'BLOCK' %}selected{% endif %}>Blacklist</option></select><small>Classification is independent from Enabled/Disabled.</small></div>
-<div class="field-group checkbox-field"><label><input type="checkbox" name="enabled" value="true" {% if values.enabled %}checked{% endif %}> Enable this access record</label></div>
-<div class="field-group"><label for="valid_from">Valid from</label><input id="valid_from" type="datetime-local" name="valid_from" value="{{ values.valid_from or '' }}"></div>
-<div class="field-group"><label for="valid_until">Valid until</label><input id="valid_until" type="datetime-local" name="valid_until" value="{{ values.valid_until or '' }}"></div>
-<div class="field-group checkbox-field"><label><input type="checkbox" name="daily_window_enabled" value="true" {% if values.daily_window_enabled %}checked{% endif %}> Limit access to a daily window</label></div>
-<div class="field-group"><label for="daily_start">Daily start</label><input id="daily_start" type="time" step="1" name="daily_start" value="{{ values.daily_start or '' }}"></div>
-<div class="field-group"><label for="daily_end">Daily end</label><input id="daily_end" type="time" step="1" name="daily_end" value="{{ values.daily_end or '' }}"></div>
-<div class="field-group"><label for="camera_comment">Camera remark</label><input id="camera_comment" name="camera_comment" maxlength="16" value="{{ values.camera_comment or '' }}"><small>Maximum 16 characters for RA5 compatibility.</small></div>
+<div class="access-entry-form" data-access-entry-form data-site-timezone="{% if not create_mode %}{{ entry.site.timezone }}{% endif %}">
+    {% if create_mode and values.recognition_id %}<input type="hidden" name="recognition_id" value="{{ values.recognition_id }}">{% endif %}
+
+    <fieldset class="access-record-section">
+        <legend>Profile &amp; Reference</legend>
+        <p class="section-description">Identify the vehicle and choose how Central monitors its stay and exit conditions.</p>
+        <div class="form-grid">
+            {% if create_mode %}
+            <div class="field-group">
+                <label for="plate">Plate</label>
+                <input id="plate" name="plate" maxlength="32" value="{{ values.plate or '' }}" autocomplete="off" {% if values.recognition_prefill %}readonly{% endif %} required>
+                {% if values.recognition_prefill %}<small>Derived from the recognition event.</small>{% endif %}
+            </div>
+            <div class="field-group">
+                <label for="site_id">Site</label>
+                <select id="site_id" name="site_id" {% if values.recognition_prefill %}disabled{% endif %} required data-site-selector>
+                    <option value="">Select site</option>
+                    {% for site in sites %}<option value="{{ site.id }}" data-timezone="{{ site.timezone }}" {% if values.site_id == site.id|string %}selected{% endif %}>{{ site.code }} &middot; {{ site.name }}</option>{% endfor %}
+                </select>
+                {% if values.recognition_prefill %}<input type="hidden" name="site_id" value="{{ values.site_id }}"><small>Derived from the recognition event.</small>{% endif %}
+            </div>
+            {% endif %}
+            <div class="field-group">
+                <label for="reference_name">Owner / Reference Name</label>
+                <input id="reference_name" name="reference_name" maxlength="120" value="{{ values.reference_name or '' }}" autocomplete="off">
+                <small>Optional owner name, company, unit number, or internal reference.</small>
+            </div>
+            <div class="field-group">
+                <label for="access-profile">Access profile</label>
+                <select id="access-profile" name="access_profile_id" data-access-profile>
+                    <option value="" data-max-stay="" data-normal-exit="USE_SITE_POLICY" data-expired-exit="USE_SITE_POLICY" data-overstay-exit="USE_SITE_POLICY" data-blacklist-exit="USE_SITE_POLICY">No access profile</option>
+                    {% for profile in access_profiles %}
+                    <option value="{{ profile.id }}" data-site-id="{{ profile.site_id }}" data-max-stay="{{ profile.default_max_stay_minutes or '' }}" data-normal-exit="{{ profile.normal_exit_policy }}" data-expired-exit="{{ profile.expired_exit_policy }}" data-overstay-exit="{{ profile.overstay_exit_policy }}" data-blacklist-exit="{{ profile.blacklist_exit_policy }}" {% if values.access_profile_id == profile.id|string %}selected{% endif %}>{{ profile.name }}</option>
+                    {% endfor %}
+                </select>
+                <small>An access profile controls Central stay limits and profile-specific exit rules. It is not sent to the RA5 camera.</small>
+            </div>
+            <div class="field-group form-grid__wide">
+                <span class="field-label">Maximum stay</span>
+                <div class="segmented-choice access-override-choice" role="radiogroup" aria-label="Maximum stay source">
+                    <label><input type="radio" name="max_stay_override_mode" value="PROFILE" {% if values.max_stay_override_mode != 'CUSTOM' %}checked{% endif %}><span>Use profile default</span></label>
+                    <label><input type="radio" name="max_stay_override_mode" value="CUSTOM" {% if values.max_stay_override_mode == 'CUSTOM' %}checked{% endif %}><span>Custom</span></label>
+                </div>
+                <div class="compound-input access-custom-stay" data-custom-stay {% if values.max_stay_override_mode != 'CUSTOM' %}hidden{% endif %}>
+                    <input id="max-stay-value" name="max_stay_override_value" type="number" min="1" step="1" value="{{ values.max_stay_override_value or '' }}" aria-label="Custom maximum stay value">
+                    <select name="max_stay_override_unit" aria-label="Custom maximum stay unit">
+                        <option value="MINUTES" {% if values.max_stay_override_unit == 'MINUTES' %}selected{% endif %}>Minutes</option>
+                        <option value="HOURS" {% if values.max_stay_override_unit == 'HOURS' %}selected{% endif %}>Hours</option>
+                        <option value="DAYS" {% if values.max_stay_override_unit == 'DAYS' %}selected{% endif %}>Days</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <aside class="access-profile-summary" aria-live="polite">
+            <div><span>Selected profile</span><strong data-profile-name>No access profile</strong></div>
+            <div><span>Profile default</span><strong data-profile-stay>Unlimited</strong></div>
+            <div><span>Effective maximum stay</span><strong data-effective-stay>Unlimited</strong></div>
+            <div><span>Normal exit</span><strong data-profile-normal>Use site policy</strong></div>
+            <div><span>After access expiry</span><strong data-profile-expired>Use site policy</strong></div>
+            <div><span>After maximum stay</span><strong data-profile-overstay>Use site policy</strong></div>
+            <div><span>While blacklisted</span><strong data-profile-blacklist>Use site policy</strong></div>
+        </aside>
+    </fieldset>
+
+    <fieldset class="access-record-section">
+        <legend>Access Control</legend>
+        <p class="section-description">Set the authorization classification independently from the selected access profile.</p>
+        <div class="field-group">
+            <span class="field-label">Access classification</span>
+            <div class="segmented-choice access-classification-choice" role="radiogroup" aria-label="Access classification">
+                <label class="segmented-choice__green"><input type="radio" name="list_type" value="ALLOW" {% if values.list_type != 'BLOCK' %}checked{% endif %}><span>Whitelist</span></label>
+                <label class="segmented-choice__red"><input type="radio" name="list_type" value="BLOCK" {% if values.list_type == 'BLOCK' %}checked{% endif %}><span>Blacklist</span></label>
+            </div>
+            <small data-classification-context>Whitelist controls current authorization. The access profile independently controls Central stay and exit behavior.</small>
+        </div>
+        <div class="field-group checkbox-field">
+            <label><input type="checkbox" name="enabled" value="true" {% if values.enabled %}checked{% endif %}> Enable this access record</label>
+            <small>Disabled records remain stored but are not treated as active authorization.</small>
+        </div>
+    </fieldset>
+
+    <fieldset class="access-record-section">
+        <legend>Validity &amp; Schedule</legend>
+        <p class="section-description">Leave an end date empty for permanent access, or define exact site-local dates and times.</p>
+        <div class="form-grid">
+            <div class="field-group">
+                <label for="valid_from">Valid from</label>
+                <div class="datetime-control">
+                    <input id="valid_from" type="datetime-local" name="valid_from" value="{{ values.valid_from or '' }}">
+                    <button class="button-secondary button-secondary--compact" type="button" data-set-current-datetime>Use current date &amp; time</button>
+                </div>
+                <small>Uses the selected site's local timezone. You can still choose or type an exact date and time.</small>
+            </div>
+            <div class="field-group">
+                <label for="valid_until">Valid until</label>
+                <input id="valid_until" type="datetime-local" name="valid_until" value="{{ values.valid_until or '' }}">
+                <small>Optional. Leave empty for no expiry.</small>
+            </div>
+            <div class="field-group checkbox-field form-grid__wide">
+                <label><input type="checkbox" name="daily_window_enabled" value="true" {% if values.daily_window_enabled %}checked{% endif %} data-daily-window-toggle> Limit access to a daily time window</label>
+            </div>
+            <div class="daily-window-fields form-grid__wide" data-daily-window-fields {% if not values.daily_window_enabled %}hidden{% endif %}>
+                <div class="field-group"><label for="daily_start">Daily start</label><input id="daily_start" type="time" step="1" name="daily_start" value="{{ values.daily_start or '' }}"></div>
+                <div class="field-group"><label for="daily_end">Daily end</label><input id="daily_end" type="time" step="1" name="daily_end" value="{{ values.daily_end or '' }}"></div>
+            </div>
+        </div>
+    </fieldset>
+
+    <fieldset class="access-record-section">
+        <legend>Camera Synchronization</legend>
+        <p class="section-description">This compatibility remark is synchronized to eligible RA5 cameras with the access record.</p>
+        <div class="field-group">
+            <label for="camera_comment">Camera remark</label>
+            <input id="camera_comment" name="camera_comment" maxlength="16" value="{{ values.camera_comment or '' }}">
+            <small>Maximum 16 characters for RA5 compatibility.</small>
+        </div>
+    </fieldset>
 </div>

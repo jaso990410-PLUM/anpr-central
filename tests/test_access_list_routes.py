@@ -15,6 +15,7 @@ from app.models.access_list_entry import AccessListEntry
 from app.models.audit_log import AuditLog
 from app.models.camera import Camera
 from app.models.permission import Permission
+from app.models.parking import AccessProfile
 from app.models.role import Role
 from app.models.site import Site
 from app.models.user import User
@@ -199,6 +200,102 @@ def test_access_form_checkboxes_use_compact_component_styles(
     assert '.field-group.checkbox-field input[type="checkbox"]' in stylesheet.text
     assert "width: 1rem" in stylesheet.text
     assert "height: 1rem" in stylesheet.text
+
+
+def test_access_form_uses_operator_friendly_sections_and_exact_datetime_control(
+    client: TestClient, db: Session
+) -> None:
+    create_user(db, ("access_list.manage",))
+    site, _ = create_site_camera(db)
+    db.add(AccessProfile(
+        site_id=site.id,
+        name="Contractor",
+        description="Time-limited contractor access",
+        default_max_stay_minutes=600,
+        overstay_monitoring_enabled=True,
+        normal_exit_policy="ALLOW",
+        expired_exit_policy="REVIEW",
+        overstay_exit_policy="DENY",
+        blacklist_exit_policy="DENY",
+        overstay_exit_grace_minutes=15,
+        enabled=True,
+    ))
+    db.commit()
+    login(client)
+
+    page = client.get("/access-list/new")
+
+    assert page.status_code == 200
+    for heading in ("Profile &amp; Reference", "Access Control", "Validity &amp; Schedule", "Camera Synchronization"):
+        assert heading in page.text
+    assert "No access profile" in page.text
+    assert "No stay profile" not in page.text
+    assert "Owner / Reference Name" in page.text
+    assert "profile-specific exit rules" in page.text
+    assert 'type="datetime-local" name="valid_from"' in page.text
+    assert "Use current date &amp; time" in page.text
+    assert 'name="max_stay_override_mode" value="PROFILE"' in page.text
+    assert 'name="max_stay_override_unit"' in page.text
+    assert 'data-max-stay="600"' in page.text
+    assert 'data-expired-exit="REVIEW"' in page.text
+    assert "/static/css/access-list.css" in page.text
+    assert "/static/js/access-list.js" in page.text
+
+
+def test_custom_maximum_stay_units_store_minutes_and_profile_default_clears_override(
+    client: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_user(db, ("access_list.view", "access_list.manage"))
+    site, _ = create_site_camera(db)
+    monkeypatch.setattr(mqtt_heartbeat_service, "enqueue_access_entry", lambda *_args, **_kwargs: 1)
+    login(client)
+
+    created = create_entry(
+        client,
+        site,
+        max_stay_override_mode="CUSTOM",
+        max_stay_override_value="10",
+        max_stay_override_unit="HOURS",
+    )
+    assert created.status_code == 303
+    entry = db.scalar(select(AccessListEntry))
+    assert entry is not None
+    assert entry.max_stay_minutes_override == 600
+
+    detail = client.get(created.headers["location"])
+    assert 'name="max_stay_override_value" type="number" min="1" step="1" value="10"' in detail.text
+    updated = client.post(
+        f"/access-list/{entry.id}",
+        data={
+            "csrf_token": csrf(detail.text),
+            "reference_name": "Nur Aisyah",
+            "list_type": "ALLOW",
+            "enabled": "true",
+            "max_stay_override_mode": "PROFILE",
+        },
+    )
+    assert updated.status_code == 303
+    db.refresh(entry)
+    assert entry.max_stay_minutes_override is None
+
+
+def test_invalid_custom_maximum_stay_is_rejected(
+    client: TestClient, db: Session
+) -> None:
+    create_user(db, ("access_list.manage",))
+    site, _ = create_site_camera(db)
+    login(client)
+
+    response = create_entry(
+        client,
+        site,
+        max_stay_override_mode="CUSTOM",
+        max_stay_override_value="0",
+        max_stay_override_unit="DAYS",
+    )
+
+    assert response.status_code == 400
+    assert "Maximum-stay override must be greater than zero" in response.text
 
 
 def test_camera_delete_actions_require_permissions_csrf_and_typed_confirmation(client: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -63,6 +63,25 @@ def _entry_or_404(service: AccessListService, entry_id: UUID) -> AccessListEntry
 
 
 def _form_values(form: dict[str, object]) -> dict[str, object]:
+    maximum_stay = form.get("max_stay_minutes_override") or ""
+    override_mode = str(form.get("max_stay_override_mode") or "").strip().upper()
+    if override_mode:
+        if override_mode == "PROFILE":
+            maximum_stay = ""
+        elif override_mode == "CUSTOM":
+            raw_value = str(form.get("max_stay_override_value") or "").strip()
+            unit = str(form.get("max_stay_override_unit") or "MINUTES").strip().upper()
+            if unit not in {"MINUTES", "HOURS", "DAYS"}:
+                raise AccessListValidationError("Select a valid maximum-stay unit")
+            try:
+                amount = int(raw_value)
+            except ValueError as error:
+                raise AccessListValidationError("Enter a whole-number maximum-stay override") from error
+            if amount <= 0:
+                raise AccessListValidationError("Maximum-stay override must be greater than zero")
+            maximum_stay = str(amount * {"MINUTES": 1, "HOURS": 60, "DAYS": 1440}[unit])
+        else:
+            raise AccessListValidationError("Select profile default or a custom maximum stay")
     return {
         "list_type": form.get("list_type", "ALLOW"),
         "enabled": form.get("enabled") == "true" or form.get("enabled") is True,
@@ -73,7 +92,26 @@ def _form_values(form: dict[str, object]) -> dict[str, object]:
         "daily_end": form.get("daily_end") or "",
         "camera_comment": form.get("camera_comment") or "",
         "access_profile_id": form.get("access_profile_id") or "",
-        "max_stay_minutes_override": form.get("max_stay_minutes_override") or "",
+        "max_stay_minutes_override": maximum_stay,
+    }
+
+
+def _submitted_values(form: dict[str, object]) -> dict[str, object]:
+    legacy = str(form.get("max_stay_minutes_override") or "").strip()
+    return {
+        "list_type": form.get("list_type", "ALLOW"),
+        "enabled": form.get("enabled") == "true" or form.get("enabled") is True,
+        "valid_from": form.get("valid_from") or "",
+        "valid_until": form.get("valid_until") or "",
+        "daily_window_enabled": form.get("daily_window_enabled") == "true" or form.get("daily_window_enabled") is True,
+        "daily_start": form.get("daily_start") or "",
+        "daily_end": form.get("daily_end") or "",
+        "camera_comment": form.get("camera_comment") or "",
+        "access_profile_id": form.get("access_profile_id") or "",
+        "max_stay_minutes_override": legacy,
+        "max_stay_override_mode": form.get("max_stay_override_mode") or ("CUSTOM" if legacy else "PROFILE"),
+        "max_stay_override_value": form.get("max_stay_override_value") or legacy,
+        "max_stay_override_unit": form.get("max_stay_override_unit") or "MINUTES",
     }
 
 
@@ -88,6 +126,13 @@ def _entry_values(entry: AccessListEntry) -> dict[str, object]:
         if value.tzinfo is None:
             value = value.replace(tzinfo=timezone.utc)
         return value.astimezone(zone).strftime("%Y-%m-%dT%H:%M")
+    override = entry.max_stay_minutes_override
+    if override and override % 1440 == 0:
+        override_value, override_unit = override // 1440, "DAYS"
+    elif override and override % 60 == 0:
+        override_value, override_unit = override // 60, "HOURS"
+    else:
+        override_value, override_unit = override or "", "MINUTES"
     return {
         "reference_name": entry.vehicle.reference_name or "",
         "list_type": entry.list_type,
@@ -100,6 +145,9 @@ def _entry_values(entry: AccessListEntry) -> dict[str, object]:
         "camera_comment": entry.camera_comment or "",
         "access_profile_id": str(entry.access_profile_id) if entry.access_profile_id else "",
         "max_stay_minutes_override": entry.max_stay_minutes_override or "",
+        "max_stay_override_mode": "CUSTOM" if override else "PROFILE",
+        "max_stay_override_value": override_value,
+        "max_stay_override_unit": override_unit,
     }
 
 
@@ -155,7 +203,7 @@ def new_access_entry(
     user: User = Depends(require_page_permission("access_list.manage")),
     db: Session = Depends(get_db),
 ) -> Response:
-    values: dict[str, object] = {"list_type": list_type, "enabled": True}
+    values: dict[str, object] = {"list_type": list_type, "enabled": True, "max_stay_override_mode": "PROFILE", "max_stay_override_unit": "HOURS"}
     if recognition_id is not None:
         event = db.get(RecognitionEvent, recognition_id)
         if event is None:
@@ -183,6 +231,9 @@ def create_access_entry(
     camera_comment: Annotated[str | None, Form()] = None,
     access_profile_id: Annotated[str | None, Form()] = None,
     max_stay_minutes_override: Annotated[str | None, Form()] = None,
+    max_stay_override_mode: Annotated[str | None, Form()] = None,
+    max_stay_override_value: Annotated[str | None, Form()] = None,
+    max_stay_override_unit: Annotated[str | None, Form()] = None,
     reference_name: Annotated[str | None, Form(max_length=120)] = None,
     recognition_id: Annotated[UUID | None, Form()] = None,
     user: User = Depends(require_page_permission("access_list.manage")),
@@ -191,7 +242,7 @@ def create_access_entry(
     service = AccessListService(db)
     raw = locals()
     create_plate, create_site_id = plate, site_id
-    values = {"plate": plate, "site_id": site_id, "reference_name": reference_name or "", **_form_values(raw)}
+    values = {"plate": plate, "site_id": site_id, "reference_name": reference_name or "", **_submitted_values(raw)}
     if recognition_id is not None:
         event = db.get(RecognitionEvent, recognition_id)
         if event is None:
@@ -207,11 +258,12 @@ def create_access_entry(
         if existing is not None:
             return RedirectResponse(f"/access-list/{existing.id}", status_code=303)
     try:
+        access_values = _form_values(raw)
         entry = service.create(
             plate=create_plate,
             site_id=create_site_id,
             reference_name=reference_name,
-            **_form_values(raw),
+            **access_values,
         )
     except AccessListValidationError as error:
         return _render_form(request, db, user, values=values, error=str(error), status_code=400)
@@ -252,14 +304,18 @@ def update_access_entry(
     daily_window_enabled: Annotated[str | None, Form()] = None, daily_start: Annotated[str | None, Form()] = None,
     daily_end: Annotated[str | None, Form()] = None, camera_comment: Annotated[str | None, Form()] = None,
     access_profile_id: Annotated[str | None, Form()] = None, max_stay_minutes_override: Annotated[str | None, Form()] = None,
+    max_stay_override_mode: Annotated[str | None, Form()] = None,
+    max_stay_override_value: Annotated[str | None, Form()] = None,
+    max_stay_override_unit: Annotated[str | None, Form()] = None,
     reference_name: Annotated[str | None, Form(max_length=120)] = None,
     user: User = Depends(require_page_permission("access_list.manage")), _csrf: str = Depends(require_session_csrf), db: Session = Depends(get_db),
 ) -> Response:
     service = AccessListService(db)
     entry = _entry_or_404(service, entry_id)
-    access_values = _form_values(locals())
-    values = {**access_values, "reference_name": reference_name or ""}
+    raw = locals()
+    values = {**_submitted_values(raw), "reference_name": reference_name or ""}
     try:
+        access_values = _form_values(raw)
         before = service.update(entry, reference_name=reference_name, **access_values)
     except AccessListValidationError as error:
         context = _context(request, db, user)

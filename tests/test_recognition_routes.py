@@ -406,7 +406,7 @@ def test_quick_access_registration_prefills_from_event_and_queues_sync(
     )
     assert form.status_code == 200
     assert 'value="QAB4838E"' in form.text
-    assert 'value="BLOCK" selected' in form.text
+    assert 'name="list_type" value="BLOCK" checked' in form.text
     assert 'name="recognition_id"' in form.text
     assert "Derived from the recognition event" in form.text
     token_match = re.search(r'name="csrf_token" value="([^"]+)"', form.text)
