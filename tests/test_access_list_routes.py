@@ -240,6 +240,7 @@ def test_access_form_uses_operator_friendly_sections_and_exact_datetime_control(
     assert 'data-expired-exit="REVIEW"' in page.text
     assert "/static/css/access-list.css" in page.text
     assert "/static/js/access-list.js" in page.text
+    assert "access-list.js?v=20261011.1" in page.text
 
 
 def test_custom_maximum_stay_units_store_minutes_and_profile_default_clears_override(
