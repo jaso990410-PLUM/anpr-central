@@ -123,19 +123,29 @@ class ParkingService:
         profile = self.db.get(DecisionResponseProfile, profile_id)
         if profile is None:
             raise ParkingValidationError("Response profile was not found.")
-        if not name.strip() or traffic_state not in {"RED", "GREEN"} or not 1 <= display_seconds <= 300 or not 1 <= green_seconds <= 300:
+        if not name.strip() or traffic_state not in {"RED", "GREEN"} or not 1 <= display_seconds <= 300:
             raise ParkingValidationError("Enter valid response profile settings.")
+        if traffic_state == "GREEN" and not 1 <= green_seconds <= 300:
+            raise ParkingValidationError("Green duration must be between 1 and 300 seconds.")
+        normalized_rows = []
         for row in rows[:4]:
             row_type = str(row.get("type", "")).upper()
             if row_type not in {"STANDARD", "CUSTOM"}:
                 raise ParkingValidationError("LED row type must be Standard or Custom.")
             if row_type == "STANDARD" and row.get("source") not in DECISION_RESPONSE_STANDARD_SOURCES:
                 raise ParkingValidationError("Select a supported standard LED source.")
-            if row_type == "CUSTOM" and any(ord(character) < 32 for character in str(row.get("text", ""))):
-                raise ParkingValidationError("Custom LED text must remain on one line.")
+            if row_type == "CUSTOM":
+                text = str(row.get("text", ""))
+                if any(ord(character) < 32 for character in text):
+                    raise ParkingValidationError("Custom LED text must remain on one line.")
+                normalized_rows.append({"type": "CUSTOM", "text": text} if text.strip() else {"type": "STANDARD", "source": "BLANK"})
+            else:
+                normalized_rows.append({"type": "STANDARD", "source": row["source"]})
         profile.name = name.strip(); profile.display_seconds = display_seconds; profile.traffic_state = traffic_state
-        profile.traffic_green_seconds = green_seconds; profile.speaker_enabled = speaker_enabled
-        profile.speaker_message = speaker_message.strip()[:250] or "{plate}"; profile.led_rows = rows[:4]
+        if traffic_state == "GREEN": profile.traffic_green_seconds = green_seconds
+        profile.speaker_enabled = speaker_enabled
+        if speaker_enabled: profile.speaker_message = speaker_message.strip()[:250] or "{plate}"
+        profile.led_rows = normalized_rows
         self.db.flush(); return profile
 
     def save_policy(self, site_id: UUID, *, operating_mode: str, unknown_entry: str, exit_mode: str, exit_blacklist: str, allow_profile: str, deny_profile: str, review_profile: str):

@@ -113,6 +113,37 @@ def test_response_profile_standard_sources_are_dropdown_backed_and_validated(cli
     assert response.status_code == 400
 
 
+def test_response_profile_editor_conditions_irrelevant_settings_and_normalizes_blank_rows(client, db):
+    create_user(db, ("parking.manage",)); seed(db); login(client)
+    profile = db.scalar(select(DecisionResponseProfile).where(DecisionResponseProfile.response_kind == "DENY"))
+    page = client.get(f"/parking/response-profiles/{profile.id}")
+    assert page.status_code == 200
+    for text in ("General", "Traffic Indicator", "LED Display", "Speaker", "Live preview", "Physical barrier"):
+        assert text in page.text
+    assert 'type="radio" name="traffic_state"' in page.text
+    response = client.post(f"/parking/response-profiles/{profile.id}", data={
+        "csrf_token": csrf(page.text), "name": "Access Denied", "display_seconds": "10",
+        "traffic_state": "RED", "traffic_green_seconds": "999", "row_1_type": "STANDARD",
+        "row_1_value": "PLATE", "row_2_type": "CUSTOM", "row_2_value": "",
+        "row_3_type": "CUSTOM", "row_3_value": "CONTACT SECURITY", "row_4_type": "STANDARD",
+        "row_4_value": "BLANK",
+    })
+    assert response.status_code == 303
+    db.refresh(profile)
+    assert profile.traffic_green_seconds == 5
+    assert profile.speaker_enabled is False and profile.speaker_message == "{plate}"
+    assert profile.led_rows[1] == {"type": "STANDARD", "source": "BLANK"}
+
+    invalid_green = client.post(f"/parking/response-profiles/{profile.id}", data={
+        "csrf_token": csrf(page.text), "name": "Access Denied", "display_seconds": "10",
+        "traffic_state": "GREEN", "traffic_green_seconds": "999", "row_1_type": "STANDARD",
+        "row_1_value": "PLATE", "row_2_type": "STANDARD", "row_2_value": "BLANK",
+        "row_3_type": "STANDARD", "row_3_value": "BLANK", "row_4_type": "STANDARD",
+        "row_4_value": "BLANK",
+    })
+    assert invalid_green.status_code == 400
+
+
 def test_access_profile_editor_uses_friendly_stay_units_and_policy_matrix(client, db):
     create_user(db, ("parking.manage",)); site = seed(db); login(client)
     page = client.get("/access-profiles")
