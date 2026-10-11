@@ -1,6 +1,7 @@
 {% if error %}<div class="form-alert" role="alert">{{ error }}</div>{% endif %}
 <div class="access-entry-form" data-access-entry-form data-site-timezone="{% if not create_mode %}{{ entry.site.timezone }}{% endif %}">
     {% if create_mode and values.recognition_id %}<input type="hidden" name="recognition_id" value="{{ values.recognition_id }}">{% endif %}
+    {% if create_mode and values.return_to %}<input type="hidden" name="return_to" value="{{ values.return_to }}">{% endif %}
 
     <fieldset class="access-record-section">
         <legend>Profile &amp; Reference</legend>

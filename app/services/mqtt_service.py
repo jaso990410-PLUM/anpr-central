@@ -303,12 +303,12 @@ class MqttHeartbeatService:
             raise RuntimeError("Offline recognition recovery is unavailable")
         return self._offline_recovery.manual_recover(camera_id)
 
-    def manual_barrier_open(self, *, camera_id: UUID, user_id: UUID, reason: str, review_item_id: UUID | None = None) -> UUID:
+    def manual_barrier_open(self, *, camera_id: UUID, user_id: UUID, reason: str, review_item_id: UUID | None = None, recognition_event_id: UUID | None = None) -> UUID:
         if self._barrier_actions is None:
             raise RuntimeError("Barrier action service is unavailable")
         try:
             self._barrier_actions.start()
-            return self._barrier_actions.create_manual(camera_id=camera_id, user_id=user_id, reason=reason, review_item_id=review_item_id)
+            return self._barrier_actions.create_manual(camera_id=camera_id, user_id=user_id, reason=reason, review_item_id=review_item_id, recognition_event_id=recognition_event_id)
         except BarrierActionError as error:
             raise RuntimeError(str(error)) from error
 

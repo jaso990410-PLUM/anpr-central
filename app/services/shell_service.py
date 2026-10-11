@@ -22,6 +22,7 @@ class NavigationGroup:
 
 
 _PERMISSION_NAVIGATION = (
+    ("Overview", "operations", "Lane Operations", "recognition", "operations.view", "/operations"),
     ("Management", "sites", "Sites", "site", "sites.view", None),
     ("Management", "cameras", "Cameras", "camera", "cameras.view", "/cameras"),
     ("Management", "peripheral-presets", "Peripheral Presets", "control-board", "control_board.view", "/peripheral-presets"),

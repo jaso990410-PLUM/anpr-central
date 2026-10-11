@@ -1,0 +1,31 @@
+.operations-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(19rem, 0.8fr); gap: 1rem; align-items: start; }
+.operations-focus { padding: clamp(1rem, 2vw, 1.5rem); }
+.operations-focus__header, .operations-focus__badges, .policy-preview header { display: flex; justify-content: space-between; gap: 0.75rem; align-items: flex-start; flex-wrap: wrap; }
+.operations-focus__badges { justify-content: flex-end; }
+.raw-plate { margin: 0.35rem 0 0; color: var(--text-secondary); }
+.evidence-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(12rem, 0.8fr); gap: 0.8rem; margin: 1rem 0; }
+.evidence-frame { min-height: 10rem; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #05080d; color: var(--text-muted); }
+.evidence-frame--plate { min-height: 7rem; }
+.evidence-frame img { width: 100%; max-height: 24rem; object-fit: contain; }
+.security-warning { display: grid; gap: 0.3rem; margin: 1rem 0; padding: 1rem; border: 1px solid rgba(239,91,91,.55); border-radius: var(--radius-sm); background: rgba(239,91,91,.1); }
+.operations-facts { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 1rem; }
+.operations-facts > section, .policy-preview, .reconciliation-panel, .similar-plates, .operations-history { padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(8,13,21,.28); }
+.operations-facts h3, .policy-preview h3, .reconciliation-panel h3, .similar-plates h3, .operations-history h3 { margin-top: 0; }
+.operator-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 1rem 0; }
+.action-drawer { margin-top: 0.75rem; padding: 0.85rem 1rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.action-drawer summary { cursor: pointer; font-weight: 700; }
+.compact-action-form { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)) auto; gap: 0.75rem; align-items: end; margin-top: 0.85rem; }
+.policy-preview, .reconciliation-panel, .similar-plates, .operations-history { margin-top: 1rem; }
+.candidate-row { display: grid; grid-template-columns: minmax(10rem,1fr) minmax(12rem,1fr) auto; gap: 0.75rem; align-items: end; padding: 0.75rem 0; border-top: 1px solid var(--border); }
+.candidate-row div, .candidate-row label { display: grid; gap: 0.25rem; }
+.recent-lane-events { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; }
+.recent-event-list { display: grid; }
+.recent-event { display: grid; gap: 0.35rem; padding: 0.85rem 1rem; border-top: 1px solid var(--border); color: var(--text-primary); text-decoration: none; }
+.recent-event:hover, .recent-event.is-selected { background: rgba(47,168,255,.1); }
+.recent-event > div { display: flex; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
+.recent-event small, .recent-event > span { color: var(--text-secondary); }
+.suggestion-list { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.suggestion-list a { display: grid; gap: 0.2rem; min-width: 9rem; padding: 0.65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); text-decoration: none; }
+.suggestion-list span { color: var(--text-secondary); font-size: 0.78rem; }
+@media (max-width: 1050px) { .operations-layout { grid-template-columns: 1fr; } .recent-lane-events { position: static; max-height: none; } }
+@media (max-width: 720px) { .operations-facts, .evidence-grid, .compact-action-form, .candidate-row { grid-template-columns: 1fr; } }

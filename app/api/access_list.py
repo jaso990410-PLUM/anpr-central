@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.navigation import safe_local_redirect
 from app.core.csrf import generate_csrf_token
 from app.db.dependencies import get_db
 from app.dependencies.auth import require_page_permission, require_permission, user_has_permission
@@ -112,6 +113,7 @@ def _submitted_values(form: dict[str, object]) -> dict[str, object]:
         "max_stay_override_mode": form.get("max_stay_override_mode") or ("CUSTOM" if legacy else "PROFILE"),
         "max_stay_override_value": form.get("max_stay_override_value") or legacy,
         "max_stay_override_unit": form.get("max_stay_override_unit") or "MINUTES",
+        "return_to": form.get("return_to") or "",
     }
 
 
@@ -200,10 +202,11 @@ def new_access_entry(
     request: Request,
     recognition_id: UUID | None = None,
     list_type: Literal["ALLOW", "BLOCK"] = "ALLOW",
+    return_to: str | None = None,
     user: User = Depends(require_page_permission("access_list.manage")),
     db: Session = Depends(get_db),
 ) -> Response:
-    values: dict[str, object] = {"list_type": list_type, "enabled": True, "max_stay_override_mode": "PROFILE", "max_stay_override_unit": "HOURS"}
+    values: dict[str, object] = {"list_type": list_type, "enabled": True, "max_stay_override_mode": "PROFILE", "max_stay_override_unit": "HOURS", "return_to": safe_local_redirect(return_to, default="")}
     if recognition_id is not None:
         event = db.get(RecognitionEvent, recognition_id)
         if event is None:
@@ -236,6 +239,7 @@ def create_access_entry(
     max_stay_override_unit: Annotated[str | None, Form()] = None,
     reference_name: Annotated[str | None, Form(max_length=120)] = None,
     recognition_id: Annotated[UUID | None, Form()] = None,
+    return_to: Annotated[str | None, Form()] = None,
     user: User = Depends(require_page_permission("access_list.manage")),
     _csrf: str = Depends(require_session_csrf), db: Session = Depends(get_db),
 ) -> Response:
@@ -270,7 +274,7 @@ def create_access_entry(
     create_audit_log(db, action="access_list.create", actor_user_id=user.id, site_id=entry.site_id, entity_type="access_list_entry", entity_id=str(entry.id), details=entry_summary(entry), ip_address=request.client.host if request.client else None)
     db.commit()
     mqtt_heartbeat_service.enqueue_access_entry(entry.id)
-    return RedirectResponse(f"/access-list/{entry.id}", status_code=303)
+    return RedirectResponse(safe_local_redirect(return_to, default=f"/access-list/{entry.id}"), status_code=303)
 
 
 @router.post("/{entry_id}/cameras/{camera_id}/delete")

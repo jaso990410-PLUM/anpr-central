@@ -92,7 +92,7 @@ class BarrierActionCoordinator:
         self.execute(action_id)
         return action_id
 
-    def create_manual(self, *, camera_id: UUID, user_id: UUID, reason: str, review_item_id: UUID | None = None) -> UUID:
+    def create_manual(self, *, camera_id: UUID, user_id: UUID, reason: str, review_item_id: UUID | None = None, recognition_event_id: UUID | None = None) -> UUID:
         self._ensure_restart_reconciled()
         clean_reason = reason.strip()
         if len(clean_reason) < 3:
@@ -105,7 +105,10 @@ class BarrierActionCoordinator:
             review = db.get(ParkingReviewItem, review_item_id) if review_item_id else None
             if review_item_id and (review is None or review.access_decision.camera_id != camera_id):
                 raise BarrierActionError("Review item does not belong to the selected barrier.")
-            action = self._new_operator_action(camera, user_id, clean_reason, "MANUAL_RELEASE", review)
+            event = db.get(RecognitionEvent, recognition_event_id) if recognition_event_id else None
+            if recognition_event_id and (event is None or event.camera_id != camera_id):
+                raise BarrierActionError("Recognition event does not belong to the selected barrier.")
+            action = self._new_operator_action(camera, user_id, clean_reason, "MANUAL_RELEASE", review, event)
             db.add(action); db.commit(); action_id = action.id
         self.execute(action_id)
         return action_id
@@ -117,7 +120,7 @@ class BarrierActionCoordinator:
             config = db.scalar(select(BarrierConfiguration).where(BarrierConfiguration.camera_id == camera_id))
             if camera is None or config is None or not config.enabled or config.control_mode != "CENTRAL_MANAGED" or not self._camera_eligible(camera) or not self._is_connected():
                 raise BarrierActionError("Enable Central Managed barrier control before testing.")
-            action = self._new_operator_action(camera, user_id, reason, "COMMISSIONING_TEST", None)
+            action = self._new_operator_action(camera, user_id, reason, "COMMISSIONING_TEST", None, None)
             db.add(action); db.commit(); action_id = action.id
         self.execute(action_id)
         return action_id
@@ -279,12 +282,12 @@ class BarrierActionCoordinator:
         return bool(camera.is_enabled and camera.connection_state == ONLINE and camera.serial_number and camera.provisioning_state != CREDENTIALS_REVOKED)
 
     @staticmethod
-    def _new_operator_action(camera: Camera, user_id: UUID, reason: str, trigger: str, review: ParkingReviewItem | None) -> BarrierAction:
+    def _new_operator_action(camera: Camera, user_id: UUID, reason: str, trigger: str, review: ParkingReviewItem | None, event: RecognitionEvent | None) -> BarrierAction:
         now = datetime.now(timezone.utc)
         decision = review.access_decision if review else None
         return BarrierAction(
             camera_id=camera.id, site_id=camera.site_id,
-            recognition_event_id=review.recognition_event_id if review else None,
+            recognition_event_id=review.recognition_event_id if review else (event.id if event else None),
             access_decision_id=decision.id if decision else None,
             parking_review_item_id=review.id if review else None,
             trigger_source=trigger, command_status="QUEUED", action_type="OPEN",

@@ -108,6 +108,8 @@ def recognition_history(
             "live_poll_seconds": settings.live_poll_seconds,
             "can_manage_access_list": user_has_permission(user, "access_list.manage"),
             "can_view_parking": user_has_permission(user, "parking.view"),
+            "can_view_operations": user_has_permission(user, "operations.view"),
+            "can_correct_plate": user_has_permission(user, "recognition.correct"),
         },
     )
 

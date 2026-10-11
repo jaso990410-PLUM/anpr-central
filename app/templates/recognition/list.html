@@ -29,7 +29,7 @@
             <tbody data-recognition-rows>
                 {% for event in result.items %}
                 <tr data-event-id="{{ event.id }}">
-                    <td><strong class="plate-value" data-field="plate">{{ event.plate }}</strong></td>
+                    <td><strong class="plate-value" data-field="plate">{{ event.plate }}</strong>{% if can_view_operations %}<span class="recognition-access__actions"><a class="table-link" href="/operations/events/{{ event.id }}">Operations</a><a class="table-link" href="/operations/events/{{ event.id }}#previous-visits">Previous Visits</a>{% if can_correct_plate %}<a class="table-link" href="/operations/events/{{ event.id }}#correct-plate">Correct Plate</a>{% endif %}</span>{% endif %}</td>
                     <td data-field="camera">{{ event.camera }}</td><td data-field="site">{{ event.site }}</td>
                     <td><span class="status-badge status-badge--{{ event.direction_code|lower }}" data-field="direction">{{ event.direction }}</span></td>
                     <td><span class="status-badge status-badge--{% if event.source == 'LIVE' %}online{% else %}neutral{% endif %}" data-field="source">{{ event.source_label }}</span></td>

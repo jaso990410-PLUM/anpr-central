@@ -36,7 +36,7 @@ def _context(request, db, user, active_page):
 @router.get("/parking/on-site", response_class=HTMLResponse)
 def on_site(request: Request, site: str | None = None, user: User = Depends(require_page_permission("parking.view")), db: Session = Depends(get_db)):
     service = ParkingService(db); site_id = UUID(site) if site else None
-    context = _context(request, db, user, "parking-on-site"); context.update({"sessions": service.on_site(site_id), "alerts": service.alerts(), "sites": service.sites(), "selected_site": site or ""})
+    context = _context(request, db, user, "parking-on-site"); context.update({"sessions": service.on_site(site_id), "alerts": service.alerts(), "sites": service.sites(), "selected_site": site or "", "can_view_operations": user_has_permission(user, "operations.view")})
     return templates.TemplateResponse(request=request, name="parking/on_site.html", context=context)
 
 

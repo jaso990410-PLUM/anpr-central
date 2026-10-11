@@ -37,6 +37,10 @@ DEFAULT_PERMISSIONS = {
     "parking.manage": "Manage parking policy, profiles, and alerts",
     "barrier.manage": "Configure and commission barrier integrations",
     "barrier.operate": "Operate and test physical barriers",
+    "operations.view": "View the lane operations console",
+    "recognition.correct": "Correct recognition plates while preserving camera evidence",
+    "parking.reconcile": "Reconcile parking sessions and exceptions",
+    "vehicle.watch": "Manage site-scoped vehicle watch flags",
 }
 
 

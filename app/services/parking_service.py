@@ -220,6 +220,7 @@ class ParkingService:
         ended = end.replace(tzinfo=timezone.utc) if end.tzinfo is None else end
         duration = max(0, int((ended - entered).total_seconds() // 60))
         return {"id": item.id, "plate": item.vehicle.plate_text, "name": item.vehicle.reference_name,
+            "entry_recognition_id": item.entry_recognition_id, "exit_recognition_id": item.exit_recognition_id,
             "site": item.site.code, "status": item.status, "entered": _display(item.entered_at, tz),
             "exited": _display(item.exited_at, tz) if item.exited_at else None, "duration": f"{duration // 60}h {duration % 60}m",
             "profile": item.access_profile.name if item.access_profile else "No profile", "max_stay": item.max_stay_minutes,
