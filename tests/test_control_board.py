@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.integrations.visionzenith.protocol import display_settings_frame, idle_frame, led_frame, traffic_light_frame
 from app.models.camera import Camera
 from app.models.site import Site
+from app.models.parking import AccessDecision, DecisionResponseProfile
+from app.models.recognition_event import RecognitionEvent
 from app.services.control_board_runtime_service import ControlBoardRuntimeService, PeripheralContext, PeripheralRuntimeCoordinator
 from app.services.control_board_service import ControlBoardService, ControlBoardValidationError
 from app.services.peripheral_preset_service import PeripheralPresetService, PeripheralPresetValidationError
@@ -108,3 +110,42 @@ def test_recognition_uses_board_channel_speaker_settings_and_schedules_restore(d
     assert calls[0]["serial_channel"] == 1
     assert calls[0]["raw_frame"].startswith(b"\xfd")
     assert restores == [(cam.id, 5.0)]
+
+
+def test_decision_response_applies_led_settings_and_site_time_sources(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    cam = camera(db)
+    cam.connection_state = "ONLINE"
+    board, _ = ControlBoardService(db).save(cam, enabled=True, serial_channel=0, baud_rate=9600, data_bits=8, parity="NONE", stop_bits=1, slave_id=1)
+    profile = DecisionResponseProfile(
+        site_id=cam.site_id, name="Allowed", response_kind="ALLOW",
+        led_rows=[
+            {"type": "STANDARD", "source": "CURRENT_DATE"},
+            {"type": "STANDARD", "source": "CURRENT_TIME"},
+            {"type": "STANDARD", "source": "CURRENT_WEEKDAY"},
+            {"type": "STANDARD", "source": "CURRENT_WEEK_NUMBER"},
+        ],
+        led_brightness=3, led_scroll_speed=2, display_seconds=5,
+        traffic_state="GREEN", traffic_green_seconds=5, speaker_enabled=False,
+        speaker_message="{plate}", speaker_volume=7, speaker_speed=5,
+        speaker_voice=3, speaker_pitch=5, plate_pause_ms=100, enabled=True,
+    )
+    captured = datetime(2026, 10, 5, 1, 0, tzinfo=timezone.utc)
+    event = RecognitionEvent(camera_id=cam.id, site_id=cam.site_id, plate_text="QAB4838E", source="LIVE", received_at=captured, captured_at=captured, event_type="FULL")
+    db.add_all([profile, event]); db.flush()
+    decision = AccessDecision(
+        recognition_event_id=event.id, site_id=cam.site_id, camera_id=cam.id,
+        access_status="WHITELIST_ACTIVE", decision="ALLOW", reason_code="ACCESS_ALLOWED",
+        policy_type="RESIDENTIAL", policy_version=1, evaluated_at=captured,
+        response_profile_id=profile.id,
+    )
+    db.add(decision); db.commit()
+    calls = []
+    class Commands:
+        def enqueue_serial(self, **kwargs): calls.append(kwargs)
+    coordinator = PeripheralRuntimeCoordinator(session_factory=sessionmaker(bind=db.get_bind(), expire_on_commit=False), command_manager=Commands(), is_connected=lambda: True)
+    monkeypatch.setattr(coordinator, "schedule_restore", lambda *_args, **_kwargs: None)
+    coordinator.apply_decision_response(decision.id)
+    assert calls[0]["command_type"] == "decision_led_settings"
+    assert calls[0]["raw_frame"] == display_settings_frame(3, 2, address=board.slave_id)
+    expected = ("05/10/2026", "09:00:00", "Monday", "Week 41")
+    assert [item["raw_frame"] for item in calls[1:5]] == [idle_frame(number, value, number, address=board.slave_id) for number, value in enumerate(expected, 1)]

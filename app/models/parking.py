@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, Uuid, func, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, Uuid, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -12,13 +12,19 @@ from app.db.base import Base
 
 class DecisionResponseProfile(Base):
     __tablename__ = "decision_response_profiles"
-    __table_args__ = (UniqueConstraint("site_id", "name", name="uq_decision_response_profile_site_name"),)
+    __table_args__ = (
+        UniqueConstraint("site_id", "name", name="uq_decision_response_profile_site_name"),
+        CheckConstraint("led_brightness BETWEEN 0 AND 5", name="ck_decision_response_profiles_led_brightness"),
+        CheckConstraint("led_scroll_speed BETWEEN 0 AND 5", name="ck_decision_response_profiles_led_scroll_speed"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     site_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("sites.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     response_kind: Mapped[str] = mapped_column(String(16), nullable=False)
     led_rows: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    led_brightness: Mapped[int] = mapped_column(Integer, default=5, server_default=text("5"), nullable=False)
+    led_scroll_speed: Mapped[int] = mapped_column(Integer, default=5, server_default=text("5"), nullable=False)
     display_seconds: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
     traffic_state: Mapped[str] = mapped_column(String(8), default="RED", nullable=False)
     traffic_green_seconds: Mapped[int] = mapped_column(Integer, default=5, nullable=False)

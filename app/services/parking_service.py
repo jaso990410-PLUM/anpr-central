@@ -19,7 +19,11 @@ class ParkingValidationError(ValueError):
     pass
 
 
-DECISION_RESPONSE_STANDARD_SOURCES = frozenset({"BLANK", "PLATE", "DECISION", "ACCESS_STATUS"})
+DECISION_RESPONSE_STANDARD_SOURCES = frozenset({
+    "BLANK", "PLATE", "DECISION", "ACCESS_STATUS", "CAMERA_NAME", "CAMERA_CODE",
+    "SITE_NAME", "SITE_CODE", "DIRECTION", "CURRENT_DATE", "CURRENT_TIME",
+    "CURRENT_WEEKDAY", "CURRENT_WEEK_NUMBER", "CURRENT_DATETIME",
+})
 
 
 class ParkingService:
@@ -119,7 +123,7 @@ class ParkingService:
     def response_profiles(self, site_id: UUID):
         return tuple(self.db.scalars(select(DecisionResponseProfile).where(DecisionResponseProfile.site_id == site_id).order_by(DecisionResponseProfile.name)).all())
 
-    def save_response_profile(self, profile_id: UUID, *, name: str, display_seconds: int, traffic_state: str, green_seconds: int, speaker_enabled: bool, speaker_message: str, rows: list[dict]):
+    def save_response_profile(self, profile_id: UUID, *, name: str, display_seconds: int, traffic_state: str, green_seconds: int, led_brightness: int, led_scroll_speed: int, speaker_enabled: bool, speaker_message: str, rows: list[dict]):
         profile = self.db.get(DecisionResponseProfile, profile_id)
         if profile is None:
             raise ParkingValidationError("Response profile was not found.")
@@ -127,6 +131,8 @@ class ParkingService:
             raise ParkingValidationError("Enter valid response profile settings.")
         if traffic_state == "GREEN" and not 1 <= green_seconds <= 300:
             raise ParkingValidationError("Green duration must be between 1 and 300 seconds.")
+        if not 0 <= led_brightness <= 5 or not 0 <= led_scroll_speed <= 5:
+            raise ParkingValidationError("LED brightness and scrolling speed must be between 0 and 5.")
         normalized_rows = []
         for row in rows[:4]:
             row_type = str(row.get("type", "")).upper()
@@ -143,6 +149,7 @@ class ParkingService:
                 normalized_rows.append({"type": "STANDARD", "source": row["source"]})
         profile.name = name.strip(); profile.display_seconds = display_seconds; profile.traffic_state = traffic_state
         if traffic_state == "GREEN": profile.traffic_green_seconds = green_seconds
+        profile.led_brightness = led_brightness; profile.led_scroll_speed = led_scroll_speed
         profile.speaker_enabled = speaker_enabled
         if speaker_enabled: profile.speaker_message = speaker_message.strip()[:250] or "{plate}"
         profile.led_rows = normalized_rows

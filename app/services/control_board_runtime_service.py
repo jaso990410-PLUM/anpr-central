@@ -246,14 +246,25 @@ class PeripheralRuntimeCoordinator:
             try:
                 self._usable(board)
                 plate = decision.recognition_event.plate_text
+                local = _utc(decision.evaluated_at).astimezone(_zone(board.camera.site.timezone))
+                standard_values = {
+                    "BLANK": "", "PLATE": plate, "DECISION": decision.decision,
+                    "ACCESS_STATUS": decision.access_status, "CAMERA_NAME": board.camera.name,
+                    "CAMERA_CODE": board.camera.code, "SITE_NAME": board.camera.site.name,
+                    "SITE_CODE": board.camera.site.code, "DIRECTION": board.camera.direction.title(),
+                    "CURRENT_DATE": local.strftime("%d/%m/%Y"), "CURRENT_TIME": local.strftime("%H:%M:%S"),
+                    "CURRENT_WEEKDAY": local.strftime("%A"), "CURRENT_WEEK_NUMBER": f"Week {local.strftime('%V')}",
+                    "CURRENT_DATETIME": local.strftime("%d/%m/%Y %H:%M"),
+                }
                 rows = []
                 for row in profile.led_rows[:4]:
                     if row.get("type") == "CUSTOM":
                         value = str(row.get("text") or "")
                     else:
-                        value = {"PLATE": plate, "DECISION": decision.decision, "ACCESS_STATUS": decision.access_status}.get(str(row.get("source") or ""), "")
+                        value = standard_values.get(str(row.get("source") or ""), "")
                     rows.append(value.replace("{plate}", plate))
                 rows.extend([""] * (4 - len(rows)))
+                self._enqueue(board, "decision_led_settings", display_settings_frame(profile.led_brightness, profile.led_scroll_speed, address=board.slave_id), qos=1, metadata={"decision_id": str(decision.id), "brightness": profile.led_brightness, "scroll_speed": profile.led_scroll_speed})
                 for number, value in enumerate(rows, 1):
                     self._enqueue(board, "decision_led_row", idle_frame(number, value, number, address=board.slave_id), qos=1, metadata={"decision_id": str(decision.id), "row": number})
                 self._enqueue(board, "decision_traffic", traffic_light_frame(red=profile.traffic_state != "GREEN", seconds=profile.traffic_green_seconds, address=board.slave_id), metadata={"decision_id": str(decision.id), "decision": decision.decision})

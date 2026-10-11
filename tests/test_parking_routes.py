@@ -103,7 +103,9 @@ def test_response_profile_standard_sources_are_dropdown_backed_and_validated(cli
     page = client.get(f"/parking/response-profiles/{profile.id}")
     assert page.status_code == 200
     assert '<select name="row_1_value"' in page.text
-    assert 'value="PLATE"' in page.text and 'value="ACCESS_STATUS"' in page.text
+    for source in ("PLATE", "ACCESS_STATUS", "CAMERA_NAME", "SITE_NAME", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_WEEKDAY", "CURRENT_WEEK_NUMBER", "CURRENT_DATETIME"):
+        assert f'value="{source}"' in page.text
+    assert 'name="led_brightness"' in page.text and 'name="led_scroll_speed"' in page.text
     response = client.post(f"/parking/response-profiles/{profile.id}", data={
         "csrf_token": csrf(page.text), "name": "Allow", "display_seconds": "5",
         "traffic_state": "GREEN", "traffic_green_seconds": "5", "row_1_type": "STANDARD",
@@ -120,12 +122,14 @@ def test_response_profile_editor_conditions_irrelevant_settings_and_normalizes_b
     assert page.status_code == 200
     for text in ("General", "Traffic Indicator", "LED Display", "Speaker", "Live preview", "Physical barrier"):
         assert text in page.text
-    assert "--led-opacity: 1; --led-glow: 6px; --scroll-duration: 4.5s" in page.text
+    for preview_setting in ("--led-opacity:", "--led-glow:", "--scroll-duration:"):
+        assert preview_setting in page.text
     assert "Long text scrolls continuously from right to left" in page.text
     assert 'type="radio" name="traffic_state"' in page.text
     response = client.post(f"/parking/response-profiles/{profile.id}", data={
         "csrf_token": csrf(page.text), "name": "Access Denied", "display_seconds": "10",
-        "traffic_state": "RED", "traffic_green_seconds": "999", "row_1_type": "STANDARD",
+        "traffic_state": "RED", "traffic_green_seconds": "999", "led_brightness": "3",
+        "led_scroll_speed": "2", "row_1_type": "STANDARD",
         "row_1_value": "PLATE", "row_2_type": "CUSTOM", "row_2_value": "",
         "row_3_type": "CUSTOM", "row_3_value": "CONTACT SECURITY", "row_4_type": "STANDARD",
         "row_4_value": "BLANK",
@@ -134,6 +138,7 @@ def test_response_profile_editor_conditions_irrelevant_settings_and_normalizes_b
     db.refresh(profile)
     assert profile.traffic_green_seconds == 5
     assert profile.speaker_enabled is False and profile.speaker_message == "{plate}"
+    assert profile.led_brightness == 3 and profile.led_scroll_speed == 2
     assert profile.led_rows[1] == {"type": "STANDARD", "source": "BLANK"}
 
     invalid_green = client.post(f"/parking/response-profiles/{profile.id}", data={
@@ -144,6 +149,15 @@ def test_response_profile_editor_conditions_irrelevant_settings_and_normalizes_b
         "row_4_value": "BLANK",
     })
     assert invalid_green.status_code == 400
+
+    invalid_led = client.post(f"/parking/response-profiles/{profile.id}", data={
+        "csrf_token": csrf(page.text), "name": "Access Denied", "display_seconds": "10",
+        "traffic_state": "RED", "led_brightness": "6", "led_scroll_speed": "0",
+        "row_1_type": "STANDARD", "row_1_value": "CURRENT_DATETIME",
+        "row_2_type": "STANDARD", "row_2_value": "BLANK", "row_3_type": "STANDARD",
+        "row_3_value": "BLANK", "row_4_type": "STANDARD", "row_4_value": "BLANK",
+    })
+    assert invalid_led.status_code == 400
 
 
 def test_access_profile_editor_uses_friendly_stay_units_and_policy_matrix(client, db):

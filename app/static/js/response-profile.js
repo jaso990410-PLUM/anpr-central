@@ -1,11 +1,24 @@
 (() => {
   const form = document.querySelector("[data-response-profile]");
   if (!form) return;
+  const now = new Date();
+  const weekOne = new Date(now.getFullYear(), 0, 1);
+  const weekNumber = Math.ceil((((now - weekOne) / 86400000) + weekOne.getDay() + 1) / 7);
   const samples = {
     BLANK: "",
     PLATE: "PFQ5217",
     DECISION: form.dataset.responseKind,
     ACCESS_STATUS: form.dataset.responseKind === "ALLOW" ? "WHITELIST_ACTIVE" : (form.dataset.responseKind === "DENY" ? "BLACKLIST_ACTIVE" : "NOT_LISTED"),
+    CAMERA_NAME: "Main Entry",
+    CAMERA_CODE: "MAIN-ENTRY-01",
+    SITE_NAME: "Main Site",
+    SITE_CODE: "MAIN",
+    DIRECTION: "Entry",
+    CURRENT_DATE: now.toLocaleDateString("en-GB"),
+    CURRENT_TIME: now.toLocaleTimeString("en-GB"),
+    CURRENT_WEEKDAY: now.toLocaleDateString("en-GB", { weekday: "long" }),
+    CURRENT_WEEK_NUMBER: `Week ${String(weekNumber).padStart(2, "0")}`,
+    CURRENT_DATETIME: `${now.toLocaleDateString("en-GB")} ${now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`,
   };
   const rows = [...form.querySelectorAll("[data-response-row]")];
   const speakerEnabled = form.querySelector("[data-speaker-enabled]");
@@ -28,6 +41,14 @@
       form.querySelector(`[data-response-preview-row="${index + 1}"]`).textContent = isCustom ? custom.value : (samples[source.value] || "");
     });
     refreshOverflow();
+
+    const brightness = Number(form.querySelector("[data-response-brightness]").value);
+    const scrollSpeed = Number(form.querySelector("[data-response-scroll-speed]").value);
+    previewScreen.style.setProperty("--led-opacity", String(brightness / 5));
+    previewScreen.style.setProperty("--led-glow", `${0.5 + brightness * 1.1}px`);
+    previewScreen.style.setProperty("--scroll-duration", `${12 - scrollSpeed * 1.5}s`);
+    form.querySelector("[data-response-brightness-output]").textContent = String(brightness);
+    form.querySelector("[data-response-scroll-speed-output]").textContent = String(scrollSpeed);
 
     const traffic = form.querySelector('[name="traffic_state"]:checked').value;
     const green = traffic === "GREEN";
