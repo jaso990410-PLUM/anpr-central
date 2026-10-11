@@ -17,12 +17,16 @@ from app.models.control_board import ControlBoard
 from app.integrations.visionzenith.protocol import (
     access_list_envelope,
     device_set_envelope,
+    gate_direct_open_envelope,
+    get_io_status_envelope,
     offline_recovery_envelope,
     serial_envelope,
 )
 from app.integrations.visionzenith.topics import (
     access_list_topic,
     device_set_topic,
+    barrier_open_topic,
+    io_status_topic,
     offline_recovery_topic,
     serial_command_topic,
 )
@@ -183,6 +187,33 @@ class VisionZenithCommandManager:
             request_metadata={"enable": "push", "max_count": max_count, "min_id": min_id},
         )
 
+    def enqueue_gate_open(self, *, barrier_action_id: UUID, camera_id: UUID, serial_number: str) -> CameraCommand:
+        request_id = f"BARRIER_OPEN-{uuid4().hex[:16]}"
+        envelope = gate_direct_open_envelope(request_id=request_id, serial_number=serial_number, bv=settings.visionzenith_bv)
+        return self._persist_and_enqueue(
+            camera_id=camera_id,
+            request_id=request_id,
+            command_type="BARRIER_OPEN",
+            topic=barrier_open_topic(serial_number),
+            payload=json.dumps(envelope, ensure_ascii=False),
+            qos=1,
+            request_metadata={"barrier_action_id": str(barrier_action_id)},
+            barrier_action_id=barrier_action_id,
+        )
+
+    def enqueue_io_status(self, *, camera_id: UUID, serial_number: str, gpio: int) -> CameraCommand:
+        request_id = f"BARRIER_GPIO_READ-{uuid4().hex[:16]}"
+        envelope = get_io_status_envelope(request_id=request_id, serial_number=serial_number, bv=settings.visionzenith_bv, gpio=gpio)
+        return self._persist_and_enqueue(
+            camera_id=camera_id,
+            request_id=request_id,
+            command_type="BARRIER_GPIO_READ",
+            topic=io_status_topic(serial_number),
+            payload=json.dumps(envelope, ensure_ascii=False),
+            qos=1,
+            request_metadata={"gpio": gpio, "input_only": True},
+        )
+
     def _persist_and_enqueue(
         self,
         *,
@@ -193,6 +224,7 @@ class VisionZenithCommandManager:
         payload: str,
         qos: int,
         request_metadata: dict[str, Any] | None,
+        barrier_action_id: UUID | None = None,
     ) -> CameraCommand:
         with self._session_factory() as db:
             command = CameraCommand(
@@ -203,6 +235,12 @@ class VisionZenithCommandManager:
                 request_metadata=request_metadata,
             )
             db.add(command)
+            if barrier_action_id is not None:
+                from app.models.barrier import BarrierAction
+                action = db.get(BarrierAction, barrier_action_id)
+                if action is None or action.camera_id != camera_id or action.request_id is not None:
+                    raise ValueError("Barrier action is unavailable for command correlation")
+                action.request_id = request_id
             # Flush server-generated values before commit, then detach the
             # return object. This avoids a post-commit refresh racing a
             # per-camera worker on SQLite while preserving PostgreSQL behavior.
@@ -312,8 +350,12 @@ class VisionZenithCommandManager:
                 readback = self._apply_rs485_reply(
                     db, command, document, accepted, serial_number
                 )
+            if command.command_type == "BARRIER_GPIO_READ" and accepted:
+                from app.services.barrier_status_service import BarrierStatusService
+                BarrierStatusService.apply_gpio_readback(db, command, document, completed_at)
             if not accepted:
                 command.error_detail = "Camera returned a non-200 result"
+            _sync_barrier_action(db, command)
             db.commit()
         with self._lock:
             event = self._pending.get(request_id)
@@ -346,6 +388,7 @@ class VisionZenithCommandManager:
                 command.status = TIMEOUT_UNCERTAIN
                 command.completed_at = datetime.now(timezone.utc)
                 command.error_detail = "No camera acknowledgement before timeout"
+                _sync_barrier_action(db, command)
             if commands:
                 db.commit()
             return len(commands)
@@ -368,6 +411,7 @@ class VisionZenithCommandManager:
             if command is not None and command.status == QUEUED:
                 command.status = PUBLISHED
                 command.published_at = datetime.now(timezone.utc)
+                _sync_barrier_action(db, command)
                 db.commit()
 
     def _set_failed(self, request_id: str, detail: str) -> None:
@@ -402,6 +446,7 @@ class VisionZenithCommandManager:
                             else "ERROR"
                         )
                         board.last_error = detail
+                _sync_barrier_action(db, command)
                 db.commit()
 
     @staticmethod
@@ -487,3 +532,19 @@ def _safe_device_set(document: dict[str, Any]) -> dict[str, Any]:
             and isinstance(value, int)
         }
     return safe
+
+
+def _sync_barrier_action(db: Session, command: CameraCommand) -> None:
+    if command.command_type != "BARRIER_OPEN":
+        return
+    from app.models.barrier import BarrierAction, BarrierConfiguration
+    action = db.scalar(select(BarrierAction).where(BarrierAction.request_id == command.request_id))
+    if action is None:
+        return
+    action.command_status = command.status
+    action.published_at = command.published_at
+    action.camera_ack_at = command.acknowledged_at
+    action.last_error = command.error_detail
+    if command.status == CAMERA_ACKNOWLEDGED:
+        configuration = db.scalar(select(BarrierConfiguration).where(BarrierConfiguration.camera_id == action.camera_id))
+        action.physical_confirmation_status = "PENDING" if configuration and configuration.feedback_mode != "NONE" else "NOT_AVAILABLE"

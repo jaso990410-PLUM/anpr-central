@@ -43,7 +43,7 @@
       {% if condition == 'overstay' %}<div class="exit-policy-matrix__row exit-policy-matrix__row--grace" data-grace-row><div><strong>Overstay enforcement grace</strong><small>The stricter overstay exit rule starts only after this period.</small></div><div class="compound-input"><input name="overstay_exit_grace_minutes" type="number" min="0" step="1" value="{{ profile.overstay_exit_grace_minutes if editing else 0 }}"><span>minutes</span></div></div>{% endif %}
       {% endfor %}
     </div>
-    <div class="alert alert--neutral"><strong>Architecture status:</strong> these settings determine Central's decision only. Physical barrier execution is not yet implemented.</div>
+    <div class="alert alert--neutral"><strong>Architecture status:</strong> these settings determine Central's decision. A separate commissioned M17 barrier action may execute OPEN; the response profile remains independent.</div>
     <div class="alert alert--warning" data-restrictive-warning hidden><strong>Manual release required:</strong> Review or Deny may hold a vehicle once physical barrier control is enabled. Ensure a staffed release procedure is available.</div>
   </fieldset>
 

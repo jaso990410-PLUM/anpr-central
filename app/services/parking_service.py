@@ -192,7 +192,7 @@ class ParkingService:
         return {"plate": normalized, "lane": camera.lane_role.title(), "access_status": status.replace("_", " ").title(), "decision": {"ALLOW": "Granted", "DENY": "Denied", "REVIEW": "Review Required", "NO_ACTION": "No Action"}[result.decision], "reason": result.reason_code.replace("_", " ").title(), "stay_rule": f"{maximum} minutes" if maximum else "Unlimited", "exit_policy_source": (result.exit_policy_source or "Not applicable").replace("_", " ").title(), "barrier_intent": result.barrier_intent.replace("_", " ").title()}
 
     def reviews(self, *, site_id: UUID | None = None, status: str = "", item_type: str = "", plate: str = "", page: int = 1, page_size: int = 50):
-        query = select(ParkingReviewItem).options(joinedload(ParkingReviewItem.site), joinedload(ParkingReviewItem.vehicle), joinedload(ParkingReviewItem.parking_session))
+        query = select(ParkingReviewItem).options(joinedload(ParkingReviewItem.site), joinedload(ParkingReviewItem.vehicle), joinedload(ParkingReviewItem.parking_session), joinedload(ParkingReviewItem.access_decision))
         count_query = select(func.count()).select_from(ParkingReviewItem)
         filters = []
         if site_id: filters.append(ParkingReviewItem.site_id == site_id)
@@ -208,7 +208,7 @@ class ParkingService:
         return {"items": tuple({"id": item.id, "plate": item.vehicle.plate_text if item.vehicle else "Unknown", "site": item.site.code,
             "type": item.item_type.replace("_", " ").title(), "type_code": item.item_type, "reason": item.reason_code.replace("_", " ").title(),
             "status": item.status, "attempts": item.attempt_count, "last_triggered": _display(item.last_triggered_at, item.site.timezone),
-            "session_id": item.parking_session_id} for item in rows), "total": total, "page": page,
+            "session_id": item.parking_session_id, "camera_id": item.access_decision.camera_id if item.access_decision else None} for item in rows), "total": total, "page": page,
             "page_count": max(1, (total + page_size - 1) // page_size)}
 
     @staticmethod

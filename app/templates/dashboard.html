@@ -90,6 +90,7 @@
     <article class="metric-card"><span class="metric-label">Exit reviews</span><strong class="metric-value">{{ parking_summary.reviews }}</strong><a class="table-link" href="/parking/reviews">Open review queue</a></article>
 </section>
 {% if overstay_alerts %}<section class="ops-panel"><header class="panel-header"><div><p class="panel-kicker">Stay monitoring</p><h2>Overstay attention</h2></div></header>{% for alert in overstay_alerts[:5] %}<div class="alert alert--warning"><strong>{{ alert.plate }}</strong> &middot; {{ alert.detected }} &middot; {{ alert.status }}</div>{% endfor %}</section>{% endif %}
+{% if barrier_exceptions %}<section class="ops-panel"><header class="panel-header"><div><p class="panel-kicker">Physical access exceptions</p><h2>Barrier Attention</h2></div><a class="button-quiet" href="/barrier-actions">View history</a></header><div class="table-wrap"><table class="data-table"><thead><tr><th>Camera</th><th>Plate</th><th>Type</th><th>Command</th><th>Physical feedback</th><th>Time</th></tr></thead><tbody>{% for item in barrier_exceptions %}<tr><td><a href="/cameras/{{ item.camera_id }}/barrier">{{ item.camera }}</a></td><td>{{ item.plate or '—' }}</td><td>{{ item.kind }}</td><td>{{ item.status }}</td><td>{{ item.physical }}</td><td class="data-text">{{ item.time }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
 {% endif %}
 
 <section class="ops-panel dashboard-mqtt-panel" aria-labelledby="dashboard-mqtt-title" {% if can_view_cameras %}data-live-status data-poll-seconds="{{ live_poll_seconds }}"{% endif %}>

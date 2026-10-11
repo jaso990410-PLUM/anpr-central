@@ -16,7 +16,11 @@ from app.integrations.visionzenith.recognition import (
 )
 from app.integrations.visionzenith.topics import (
     ACCESS_LIST_REPLY,
+    BARRIER_GATE_STATUS,
+    BARRIER_OPEN_REPLY,
     DEVICE_SET_REPLY,
+    GPIO_INPUT,
+    GPIO_STATUS_REPLY,
     OFFLINE_RECOVERY_REPLY,
     QUICK_RECOGNITION,
     RECOGNITION,
@@ -25,6 +29,7 @@ from app.integrations.visionzenith.topics import (
 from app.models.camera import Camera
 from app.services.camera_presence_service import mark_camera_online
 from app.services.camera_service import CREDENTIALS_REVOKED
+from app.services.barrier_status_service import BarrierFeedbackRejected, BarrierStatusService
 
 
 class NativeMessageRejected(ValueError):
@@ -97,11 +102,23 @@ class VisionZenithAdapter:
         if native_topic.message_type == KEEP_ALIVE:
             process_native_heartbeat(db, topic, payload, now=now)
             return KEEP_ALIVE
-        if native_topic.message_type in (SERIAL_REPLY, ACCESS_LIST_REPLY, DEVICE_SET_REPLY, OFFLINE_RECOVERY_REPLY):
+        if native_topic.message_type in (SERIAL_REPLY, ACCESS_LIST_REPLY, DEVICE_SET_REPLY, OFFLINE_RECOVERY_REPLY, BARRIER_OPEN_REPLY, GPIO_STATUS_REPLY):
             if not command_manager.handle_reply(
                 native_topic.serial_number, payload
             ):
                 raise NativeMessageRejected("Unknown or malformed command reply")
+            return native_topic.message_type
+        if native_topic.message_type == BARRIER_GATE_STATUS:
+            try:
+                BarrierStatusService(db).handle_native_status(native_topic.serial_number, payload, now=now)
+            except BarrierFeedbackRejected as error:
+                raise NativeMessageRejected(str(error)) from error
+            return native_topic.message_type
+        if native_topic.message_type == GPIO_INPUT:
+            try:
+                BarrierStatusService(db).handle_gpio_event(native_topic.serial_number, payload, command_manager)
+            except BarrierFeedbackRejected as error:
+                raise NativeMessageRejected(str(error)) from error
             return native_topic.message_type
         if native_topic.message_type in (QUICK_RECOGNITION, RECOGNITION):
             self._handle_recognition(

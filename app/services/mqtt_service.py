@@ -52,6 +52,8 @@ from app.services.camera_presence_service import (
 from app.services.camera_service import CREDENTIALS_REVOKED
 from app.services.control_board_runtime_service import PeripheralRuntimeCoordinator
 from app.services.parking_event_service import ParkingEventCoordinator
+from app.services.barrier_action_service import BarrierActionCoordinator, BarrierActionError
+from app.services.barrier_status_service import BarrierStatusService
 
 
 logger = logging.getLogger(__name__)
@@ -200,6 +202,7 @@ class MqttHeartbeatService:
         self._offline_recovery: OfflineRecoveryCoordinator | None = None
         self._access_sync: AccessListSyncCoordinator | None = None
         self._control_board_runtime: PeripheralRuntimeCoordinator | None = None
+        self._barrier_actions: BarrierActionCoordinator | None = None
         self._visionzenith = VisionZenithAdapter(
             auto_led_enabled=settings.visionzenith_auto_led_enabled
         )
@@ -300,6 +303,33 @@ class MqttHeartbeatService:
             raise RuntimeError("Offline recognition recovery is unavailable")
         return self._offline_recovery.manual_recover(camera_id)
 
+    def manual_barrier_open(self, *, camera_id: UUID, user_id: UUID, reason: str, review_item_id: UUID | None = None) -> UUID:
+        if self._barrier_actions is None:
+            raise RuntimeError("Barrier action service is unavailable")
+        try:
+            self._barrier_actions.start()
+            return self._barrier_actions.create_manual(camera_id=camera_id, user_id=user_id, reason=reason, review_item_id=review_item_id)
+        except BarrierActionError as error:
+            raise RuntimeError(str(error)) from error
+
+    def test_barrier_open(self, *, camera_id: UUID, user_id: UUID, reason: str = "Commissioning gate-open test") -> UUID:
+        if self._barrier_actions is None:
+            raise RuntimeError("Barrier action service is unavailable")
+        try:
+            self._barrier_actions.start()
+            return self._barrier_actions.create_test(camera_id=camera_id, user_id=user_id, reason=reason)
+        except BarrierActionError as error:
+            raise RuntimeError(str(error)) from error
+
+    def refresh_barrier_status(self, camera_id: UUID) -> int:
+        if self._barrier_actions is None:
+            raise RuntimeError("Barrier action service is unavailable")
+        try:
+            self._barrier_actions.start()
+            return self._barrier_actions.reconcile_feedback(camera_id)
+        except BarrierActionError as error:
+            raise RuntimeError(str(error)) from error
+
     def start(self, configuration: EffectiveMqttConfig | None = None) -> None:
         with self._lifecycle_lock:
             if self._running:
@@ -322,6 +352,11 @@ class MqttHeartbeatService:
                 is_connected=lambda: self.is_connected,
             )
             self._control_board_runtime.start()
+            self._barrier_actions = BarrierActionCoordinator(
+                session_factory=self._session_factory,
+                command_manager=self._command_manager,
+                is_connected=lambda: self.is_connected,
+            )
             self._offline_recovery = OfflineRecoveryCoordinator(
                 session_factory=self._session_factory,
                 command_manager=self._command_manager,
@@ -329,7 +364,7 @@ class MqttHeartbeatService:
             )
             self._parking_events = ParkingEventCoordinator(
                 self._session_factory,
-                action_callback=self._control_board_runtime.apply_decision_response,
+                action_callback=self._dispatch_decision_actions,
             )
             self._recognition_worker = RecognitionWorker(
                 session_factory=self._session_factory,
@@ -415,6 +450,8 @@ class MqttHeartbeatService:
                     self._recognition_worker.stop()
                 if self._control_board_runtime is not None:
                     self._control_board_runtime.stop()
+                if self._barrier_actions is not None:
+                    self._barrier_actions.stop()
                 self._command_manager.stop()
             self._connected.clear()
             with self._native_probe_lock:
@@ -425,6 +462,7 @@ class MqttHeartbeatService:
             self._offline_recovery = None
             self._access_sync = None
             self._control_board_runtime = None
+            self._barrier_actions = None
             self._client = None
             self._running = False
 
@@ -563,6 +601,8 @@ class MqttHeartbeatService:
                         self._access_sync.enqueue_pending_for_camera(camera.id)
                     if self._control_board_runtime is not None:
                         self._control_board_runtime.restore_camera(camera.id)
+                    if self._barrier_actions is not None:
+                        self._barrier_actions.camera_connected(camera.id)
                     return
                 else:
                     if self._command_manager is None:
@@ -595,6 +635,8 @@ class MqttHeartbeatService:
                             self._access_sync.enqueue_pending_for_camera(camera.id)
                         if self._control_board_runtime is not None:
                             self._control_board_runtime.restore_camera(camera.id)
+                        if self._barrier_actions is not None:
+                            self._barrier_actions.camera_connected(camera.id)
             except (
                 HeartbeatRejected,
                 NativeMessageRejected,
@@ -626,6 +668,8 @@ class MqttHeartbeatService:
                         self._native_probe_camera_ids.difference_update(
                             offline_camera_ids
                         )
+                    BarrierStatusService(db).mark_offline_states_unknown()
+                    db.commit()
                 if self._command_manager is not None:
                     self._command_manager.mark_orphaned_commands()
                 if self._offline_recovery is not None:
@@ -656,6 +700,19 @@ class MqttHeartbeatService:
             return False
         result = client.publish(topic, payload, qos=qos, retain=False)
         return result.rc == mqtt.MQTT_ERR_SUCCESS
+
+    def _dispatch_decision_actions(self, decision_id: UUID) -> None:
+        if self._control_board_runtime is not None:
+            try:
+                self._control_board_runtime.apply_decision_response(decision_id)
+            except Exception:
+                logger.exception("Decision presentation failed", extra={"decision_id": str(decision_id)})
+        if self._barrier_actions is not None:
+            try:
+                self._barrier_actions.start()
+                self._barrier_actions.create_automatic(decision_id)
+            except Exception:
+                logger.exception("Automatic barrier action failed", extra={"decision_id": str(decision_id)})
 
 
 def _connection_error(reason_code: Any) -> str:

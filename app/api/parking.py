@@ -13,6 +13,7 @@ from app.dependencies.csrf import require_session_csrf
 from app.models.parking import OverstayAlert
 from app.models.user import User
 from app.models.camera import Camera
+from app.models.barrier import BarrierConfiguration
 from sqlalchemy import select
 from app.services.audit_service import create_audit_log
 from app.services.dashboard_service import get_dashboard_summary
@@ -152,8 +153,23 @@ def review_queue(request: Request, site: str = "", status: str = "", item_type: 
     try: site_id = UUID(site) if site else None
     except ValueError as error: raise HTTPException(400, "Invalid site filter") from error
     result = service.reviews(site_id=site_id, status=status, item_type=item_type, plate=plate, page=max(1, page))
+    eligible_camera_ids = set(db.scalars(
+        select(BarrierConfiguration.camera_id)
+        .join(Camera, Camera.id == BarrierConfiguration.camera_id)
+        .where(
+            BarrierConfiguration.enabled.is_(True),
+            BarrierConfiguration.control_mode == "CENTRAL_MANAGED",
+            BarrierConfiguration.commissioned_at.is_not(None),
+            BarrierConfiguration.local_auto_open_verified.is_(True),
+            Camera.is_enabled.is_(True),
+            Camera.connection_state == "ONLINE",
+            Camera.lane_role.in_(("ENTRY", "EXIT")),
+        )
+    ).all())
+    for item in result["items"]:
+        item["can_open_barrier"] = item["camera_id"] in eligible_camera_ids
     context = _context(request, db, user, "parking-reviews")
-    context.update({"result": result, "sites": service.sites(), "filters": {"site": site, "status": status, "item_type": item_type, "plate": plate}, "can_manage": user_has_permission(user, "parking.manage")})
+    context.update({"result": result, "sites": service.sites(), "filters": {"site": site, "status": status, "item_type": item_type, "plate": plate}, "can_manage": user_has_permission(user, "parking.manage"), "can_operate_barrier": user_has_permission(user, "barrier.operate")})
     return templates.TemplateResponse(request=request, name="parking/reviews.html", context=context)
 
 

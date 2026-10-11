@@ -95,6 +95,7 @@ def camera_list(
             "cameras": CameraService(db).list_cameras(),
             "can_manage_cameras": user_has_permission(user, "cameras.manage"),
             "can_view_control_board": user_has_permission(user, "control_board.view"),
+            "can_view_barrier": user_has_permission(user, "cameras.view"),
         }
     )
     return templates.TemplateResponse(
@@ -207,6 +208,7 @@ def camera_detail(
             "offline_recovery": service.offline_recovery_summary(camera),
             "can_manage_cameras": user_has_permission(user, "cameras.manage"),
             "can_view_control_board": user_has_permission(user, "control_board.view"),
+            "can_view_barrier": user_has_permission(user, "cameras.view"),
             "can_delete_all_access_list": user_has_permission(user, "access_list.delete_all_camera"),
         }
     )

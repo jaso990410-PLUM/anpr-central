@@ -123,6 +123,13 @@
 </section>
 {% endif %}
 
+{% if can_view_barrier %}
+<section class="ops-panel">
+    <header class="panel-header"><div><p class="panel-kicker">Physical access</p><h2>Barrier Control</h2></div><a class="button-secondary" href="/cameras/{{ camera.id }}/barrier">Configure &amp; monitor</a></header>
+    <p class="panel-note">Central barrier ownership, safety commissioning, one-shot OPEN actions, camera acknowledgement, and independent physical feedback.</p>
+</section>
+{% endif %}
+
 <section class="ops-panel" aria-labelledby="recent-command-title">
     <header class="panel-header"><div><p class="panel-kicker">Delivery diagnostics</p><h2 id="recent-command-title">Recent commands</h2></div></header>
     <div class="table-wrap">

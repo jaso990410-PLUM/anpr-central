@@ -16,6 +16,7 @@ from app.models.recognition_event import RecognitionEvent
 from app.models.site import Site
 from app.models.vehicle import Vehicle
 from app.models.parking import AccessDecision
+from app.models.barrier import BarrierAction
 from app.services.access_list_service import overall_sync_status
 
 
@@ -152,13 +153,13 @@ class RecognitionService:
                 "id": str(event.id),
                 **_access_dict(entry, site),
             }
-            for event, _camera, site, entry, _decision in rows
+            for event, _camera, site, entry, _decision, _barrier_action in rows
         )
 
     @staticmethod
     def _event_query():
         return (
-            select(RecognitionEvent, Camera, Site, AccessListEntry, AccessDecision)
+            select(RecognitionEvent, Camera, Site, AccessListEntry, AccessDecision, BarrierAction)
             .join(Camera, Camera.id == RecognitionEvent.camera_id)
             .join(Site, Site.id == RecognitionEvent.site_id)
             .outerjoin(
@@ -173,6 +174,7 @@ class RecognitionService:
                 ),
             )
             .outerjoin(AccessDecision, AccessDecision.recognition_event_id == RecognitionEvent.id)
+            .outerjoin(BarrierAction, and_(BarrierAction.access_decision_id == AccessDecision.id, BarrierAction.trigger_source == "AUTO_DECISION"))
             .options(selectinload(AccessListEntry.camera_syncs))
         )
 
@@ -266,6 +268,7 @@ def _event_dict(
     site: Site,
     access_entry: AccessListEntry | None,
     decision: AccessDecision | None,
+    barrier_action: BarrierAction | None,
 ) -> dict[str, object]:
     timestamp = event.captured_at or event.received_at
     try:
@@ -285,7 +288,9 @@ def _event_dict(
         "decision_reason": (decision.reason_code.replace("_", " ").title() if decision else "Awaiting evaluation"),
         "exit_policy_source": (decision.exit_policy_source.replace("_", " ").title() if decision and decision.exit_policy_source else None),
         "barrier_intent": (decision.barrier_intent.replace("_", " ").title() if decision else "None"),
-        "physical_execution": (decision.physical_execution.replace("_", " ").title() if decision else "Not Implemented"),
+        "physical_execution": (decision.physical_execution.replace("_", " ").title() if decision else "No Action"),
+        "barrier_action_status": (barrier_action.command_status.replace("_", " ").title() if barrier_action else "None"),
+        "barrier_physical_status": (barrier_action.physical_confirmation_status.replace("_", " ").title() if barrier_action else "Not Available"),
         "decision_tone": ({"ALLOW": "online", "DENY": "critical", "REVIEW": "warning", "NO_ACTION": "neutral"}.get(decision.decision, "warning") if decision else "warning"),
         "confidence": event.confidence,
         "confidence_display": (

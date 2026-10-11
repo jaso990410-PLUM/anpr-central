@@ -237,3 +237,31 @@ def offline_recovery_envelope(*, request_id: str, serial_number: str, bv: int, m
         "timestamp": timestamp if timestamp is not None else int(datetime.now(timezone.utc).timestamp()),
         "payload": {"type": "check_offline_record", "body": {"enable": "push", "max_count": max_count, "min_id": min_id}},
     }
+
+
+def gate_direct_open_envelope(*, request_id: str, serial_number: str, bv: int, timestamp: int | None = None) -> dict[str, Any]:
+    """Build the physically verified RA5 direct-open request."""
+    return {
+        "id": request_id,
+        "bv": bv,
+        "sn": serial_number,
+        "name": "gate_direct_open",
+        "version": "1.0",
+        "timestamp": timestamp if timestamp is not None else int(datetime.now(timezone.utc).timestamp()),
+        "payload": None,
+    }
+
+
+def get_io_status_envelope(*, request_id: str, serial_number: str, bv: int, gpio: int, timestamp: int | None = None) -> dict[str, Any]:
+    """Build the documented input-only GPIO status query."""
+    if type(gpio) is not int or not 0 <= gpio <= 255:
+        raise ValueError("GPIO input must be between 0 and 255")
+    return {
+        "id": request_id,
+        "bv": bv,
+        "sn": serial_number,
+        "name": "get_io_status",
+        "version": "1.0",
+        "timestamp": timestamp if timestamp is not None else int(datetime.now(timezone.utc).timestamp()),
+        "payload": {"type": "get_io_status", "body": {"type": 0, "gpio": gpio}},
+    }

@@ -1,6 +1,7 @@
 from app.models.access_list_camera_sync import AccessListCameraSync
 from app.models.access_list_entry import AccessListEntry
 from app.models.audit_log import AuditLog
+from app.models.barrier import BarrierAction, BarrierConfiguration, BarrierState
 from app.models.camera import Camera
 from app.models.camera_command import CameraCommand
 from app.models.control_board import (
@@ -29,6 +30,9 @@ __all__ = [
     "AccessListCameraSync",
     "AccessListEntry",
     "AuditLog",
+    "BarrierAction",
+    "BarrierConfiguration",
+    "BarrierState",
     "Camera",
     "CameraCommand",
     "ControlBoard",

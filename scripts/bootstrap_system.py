@@ -35,6 +35,8 @@ DEFAULT_PERMISSIONS = {
     "control_board.test": "Send explicit control-board hardware test commands",
     "parking.view": "View parking sessions, decisions, and alerts",
     "parking.manage": "Manage parking policy, profiles, and alerts",
+    "barrier.manage": "Configure and commission barrier integrations",
+    "barrier.operate": "Operate and test physical barriers",
 }
 
 

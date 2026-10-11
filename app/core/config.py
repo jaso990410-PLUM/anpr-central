@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     offline_recovery_timeout_seconds: int = Field(default=60, ge=10, le=900)
     live_poll_seconds: int = Field(default=5, ge=3, le=30)
     stay_monitor_interval_seconds: int = Field(default=30, ge=5, le=300)
+    barrier_action_max_age_seconds: int = Field(default=8, ge=1, le=60)
 
     default_site_code: str = "MAIN"
 

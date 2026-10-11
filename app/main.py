@@ -9,6 +9,7 @@ from app.api.account import router as account_router
 from app.api.access_list import router as access_list_router
 from app.api.audit import router as audit_router
 from app.api.auth import router as auth_router
+from app.api.barriers import router as barriers_router
 from app.api.cameras import router as cameras_router
 from app.api.control_boards import router as control_boards_router
 from app.api.mqtt_settings import router as mqtt_settings_router
@@ -61,6 +62,7 @@ app.include_router(account_router)
 app.include_router(access_list_router)
 app.include_router(audit_router)
 app.include_router(auth_router)
+app.include_router(barriers_router)
 app.include_router(cameras_router)
 app.include_router(control_boards_router)
 app.include_router(mqtt_settings_router)

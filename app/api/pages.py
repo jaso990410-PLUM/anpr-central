@@ -18,6 +18,7 @@ from app.services.mqtt_service import mqtt_heartbeat_service
 from app.services.recognition_service import RecognitionService
 from app.services.parking_service import ParkingService
 from app.services.shell_service import build_navigation, role_label
+from app.services.barrier_query_service import dashboard_barrier_exceptions
 from app.web import templates
 
 
@@ -58,6 +59,7 @@ def dashboard(
             "can_view_parking": can_view_parking,
             "parking_summary": ParkingService(db).summary() if can_view_parking else None,
             "overstay_alerts": ParkingService(db).alerts() if can_view_parking else (),
+            "barrier_exceptions": dashboard_barrier_exceptions(db) if can_view_parking else (),
             "latest_recognition": (
                 RecognitionService(db).latest() if can_view_events else None
             ),
