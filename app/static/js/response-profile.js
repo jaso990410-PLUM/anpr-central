@@ -9,6 +9,13 @@
   };
   const rows = [...form.querySelectorAll("[data-response-row]")];
   const speakerEnabled = form.querySelector("[data-speaker-enabled]");
+  const previewScreen = form.querySelector("[data-response-preview-screen]");
+
+  const refreshOverflow = () => {
+    form.querySelectorAll("[data-response-preview-row]").forEach((row) => {
+      row.classList.toggle("is-overflowing", row.scrollWidth > previewScreen.clientWidth);
+    });
+  };
 
   const refresh = () => {
     rows.forEach((row, index) => {
@@ -20,6 +27,7 @@
       custom.hidden = !isCustom; custom.disabled = !isCustom;
       form.querySelector(`[data-response-preview-row="${index + 1}"]`).textContent = isCustom ? custom.value : (samples[source.value] || "");
     });
+    refreshOverflow();
 
     const traffic = form.querySelector('[name="traffic_state"]:checked').value;
     const green = traffic === "GREEN";
@@ -29,6 +37,7 @@
     form.querySelector("[data-green-not-applicable]").hidden = green;
     const light = form.querySelector("[data-response-preview-light]");
     light.textContent = traffic;
+    light.setAttribute("aria-label", `Traffic indicator: ${traffic}`);
     light.className = `peripheral-preview__light peripheral-preview__light--${traffic.toLowerCase()}`;
 
     const messageGroup = form.querySelector("[data-speaker-message]");
@@ -47,5 +56,7 @@
 
   form.addEventListener("input", refresh);
   form.addEventListener("change", refresh);
+  window.addEventListener("resize", refreshOverflow);
   refresh();
+  document.fonts?.ready.then(refreshOverflow);
 })();

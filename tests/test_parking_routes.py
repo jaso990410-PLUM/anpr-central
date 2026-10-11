@@ -120,6 +120,8 @@ def test_response_profile_editor_conditions_irrelevant_settings_and_normalizes_b
     assert page.status_code == 200
     for text in ("General", "Traffic Indicator", "LED Display", "Speaker", "Live preview", "Physical barrier"):
         assert text in page.text
+    assert "--led-opacity: 1; --led-glow: 6px; --scroll-duration: 4.5s" in page.text
+    assert "Long text scrolls continuously from right to left" in page.text
     assert 'type="radio" name="traffic_state"' in page.text
     response = client.post(f"/parking/response-profiles/{profile.id}", data={
         "csrf_token": csrf(page.text), "name": "Access Denied", "display_seconds": "10",
