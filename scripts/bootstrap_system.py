@@ -41,6 +41,10 @@ DEFAULT_PERMISSIONS = {
     "recognition.correct": "Correct recognition plates while preserving camera evidence",
     "parking.reconcile": "Reconcile parking sessions and exceptions",
     "vehicle.watch": "Manage site-scoped vehicle watch flags",
+    "residential.view": "View residential units, residents, and vehicle relationships",
+    "residential.manage": "Manage residential identity and vehicle relationships",
+    "visitor.manage": "Create and manage visitor reservations",
+    "visitor.approve": "Approve and reject visitor reservations",
 }
 
 

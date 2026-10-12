@@ -18,6 +18,7 @@ from app.models.access_list_entry import AccessListEntry
 from app.models.recognition_event import RecognitionEvent
 from app.models.user import User
 from app.models.parking import AccessProfile
+from app.models.residential import ResidentVehicleAssignment, VisitorReservation
 from sqlalchemy import select
 from app.services.access_list_service import (
     AccessListService,
@@ -297,7 +298,9 @@ def delete_camera_record(
 def access_entry_detail(entry_id: UUID, request: Request, user: User = Depends(require_page_permission("access_list.view")), db: Session = Depends(get_db)) -> HTMLResponse:
     entry = _entry_or_404(AccessListService(db), entry_id)
     context = _context(request, db, user)
-    context.update({"entry": entry, "values": _entry_values(entry), "access_profiles": tuple(db.scalars(select(AccessProfile).where(AccessProfile.site_id == entry.site_id, AccessProfile.enabled.is_(True)).order_by(AccessProfile.name)).all()), "overall_status": overall_sync_status(entry), "display_datetime": display_datetime, "error": None})
+    context.update({"entry": entry, "values": _entry_values(entry), "access_profiles": tuple(db.scalars(select(AccessProfile).where(AccessProfile.site_id == entry.site_id, AccessProfile.enabled.is_(True)).order_by(AccessProfile.name)).all()), "overall_status": overall_sync_status(entry), "display_datetime": display_datetime, "error": None,
+                    "residential_assignment": db.scalar(select(ResidentVehicleAssignment).where(ResidentVehicleAssignment.access_list_entry_id == entry.id, ResidentVehicleAssignment.active.is_(True))),
+                    "visitor_bindings": tuple(db.scalars(select(VisitorReservation).where(VisitorReservation.access_list_entry_id == entry.id).order_by(VisitorReservation.created_at.desc()).limit(10)).all())})
     return templates.TemplateResponse(request=request, name="access_list/detail.html", context=context)
 
 

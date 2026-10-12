@@ -16,6 +16,7 @@ from app.models.parking import AccessDecision, ParkingReviewItem, ParkingSession
 from app.models.recognition_event import RecognitionEvent
 from app.models.site import Site
 from app.models.vehicle import Vehicle
+from app.models.residential import VisitorReservation
 from app.services.access_list_service import AccessListValidationError, normalize_plate
 from app.services.parking_service import ParkingService, ParkingValidationError
 from app.services.plate_correction_service import PlateCorrectionService, effective_plate
@@ -130,6 +131,16 @@ class OperationsService:
         barrier_action = self.db.scalar(select(BarrierAction).where(BarrierAction.recognition_event_id == event.id).order_by(BarrierAction.requested_at.desc()).limit(1))
         barrier_state = self.db.scalar(select(BarrierState).where(BarrierState.camera_id == event.camera_id))
         reconciliations = tuple(self.db.scalars(select(ParkingReconciliation).where(or_(ParkingReconciliation.primary_recognition_event_id == event.id, ParkingReconciliation.secondary_recognition_event_id == event.id)).order_by(ParkingReconciliation.performed_at.desc())).all())
+        visitor = self.db.get(VisitorReservation, session.visitor_reservation_id) if session and session.visitor_reservation_id else None
+        if visitor is None:
+            captured = _utc(event.captured_at or event.received_at)
+            visitor = self.db.scalar(select(VisitorReservation).where(
+                VisitorReservation.site_id == event.site_id,
+                VisitorReservation.plate_normalized == plate,
+                VisitorReservation.approval_status == "APPROVED",
+                VisitorReservation.valid_from <= captured,
+                VisitorReservation.valid_until >= captured,
+            ).order_by(VisitorReservation.expected_arrival_at, VisitorReservation.created_at))
         try:
             preview = ParkingService(self.db).simulate(site_id=event.site_id, camera_id=event.camera_id, plate=plate, evaluated_at=datetime.now(timezone.utc))
         except ParkingValidationError:
@@ -150,6 +161,7 @@ class OperationsService:
             "barrier_action": barrier_action,
             "barrier_state": barrier_state,
             "reconciliations": reconciliations,
+            "visitor": visitor,
             "preview": preview,
             "movement_direction": _movement_direction(event),
             "captured_display": self._display(event.captured_at or event.received_at, event.site.timezone),

@@ -28,6 +28,7 @@ from app.services.parking_reconciliation_service import ParkingReconciliationSer
 from app.services.parking_review_service import ParkingReviewService
 from app.services.plate_correction_service import PlateCorrectionError, PlateCorrectionService
 from app.services.shell_service import build_navigation, role_label
+from app.services.visitor_reservation_service import VisitorReservationService
 from app.web import templates
 
 
@@ -57,6 +58,7 @@ def _context(request: Request, db: Session, user: User) -> dict[str, object]:
         "can_manage_access": user_has_permission(user, "access_list.manage"),
         "can_operate_barrier": user_has_permission(user, "barrier.operate"),
         "can_manage_reviews": user_has_permission(user, "parking.manage"),
+        "can_manage_visitors": user_has_permission(user, "visitor.manage"),
         "mqtt_connected": mqtt_heartbeat_service.is_connected,
         "live_poll_seconds": settings.live_poll_seconds,
     }
@@ -101,6 +103,10 @@ def _render_operations(
         "error": error,
         "action_token": uuid4().hex,
         "open_exception_count": db.scalar(select(func.count()).select_from(ParkingSessionIssue).where(ParkingSessionIssue.status == "OPEN")) or 0,
+        "visitor_candidates": VisitorReservationService(db).candidates_without_plate(
+            site_id=selected["event"].site_id,
+            at=selected["event"].captured_at or selected["event"].received_at,
+        ) if selected and not selected.get("visitor") else (),
     })
     return templates.TemplateResponse(request=request, name="operations/console.html", context=context, status_code=status_code)
 

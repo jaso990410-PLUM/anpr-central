@@ -15,6 +15,7 @@ from app.models.control_board import (
 from app.models.mqtt_broker_config import MqttBrokerConfig
 from app.models.offline_recovery_run import OfflineRecoveryRun
 from app.models.operations import ParkingReconciliation, RecognitionPlateCorrection, VehicleWatch
+from app.models.residential import Resident, ResidentialSiteSettings, ResidentialUnit, ResidentUnitMembership, ResidentVehicleAssignment, VisitorReservation
 from app.models.recognition_event import RecognitionEvent
 from app.models.permission import Permission
 from app.models.role import Role
@@ -42,6 +43,12 @@ __all__ = [
     "ParkingReconciliation",
     "RecognitionPlateCorrection",
     "VehicleWatch",
+    "Resident",
+    "ResidentialSiteSettings",
+    "ResidentialUnit",
+    "ResidentUnitMembership",
+    "ResidentVehicleAssignment",
+    "VisitorReservation",
     "RecognitionEvent",
     "Permission",
     "PeripheralBehavior",

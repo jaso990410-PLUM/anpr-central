@@ -129,6 +129,7 @@ class ParkingSession(Base):
     effective_blacklist_exit_policy: Mapped[str] = mapped_column(String(20), default="DENY", nullable=False)
     effective_overstay_exit_grace_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     source: Mapped[str] = mapped_column(String(24), default="LIVE", nullable=False)
+    visitor_reservation_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("visitor_reservations.id", ondelete="SET NULL"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -137,6 +138,7 @@ class ParkingSession(Base):
     access_profile = relationship("AccessProfile")
     entry_recognition = relationship("RecognitionEvent", foreign_keys=[entry_recognition_id])
     exit_recognition = relationship("RecognitionEvent", foreign_keys=[exit_recognition_id])
+    visitor_reservation = relationship("VisitorReservation")
 
 
 class ParkingSessionIssue(Base):

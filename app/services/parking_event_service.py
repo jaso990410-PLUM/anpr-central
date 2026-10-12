@@ -16,9 +16,10 @@ logger = logging.getLogger(__name__)
 class ParkingEventCoordinator:
     """Persist the business result first; invoke hardware only after commit."""
 
-    def __init__(self, session_factory: sessionmaker[Session], action_callback=None):
+    def __init__(self, session_factory: sessionmaker[Session], action_callback=None, access_sync_callback=None):
         self._session_factory = session_factory
         self._action_callback = action_callback
+        self._access_sync_callback = access_sync_callback
 
     def process_event(self, event_id: UUID) -> None:
         decision_id = None
@@ -38,3 +39,13 @@ class ParkingEventCoordinator:
                 self._action_callback(decision_id)
             except Exception:
                 logger.exception("Decision action failed after durable commit", extra={"decision_id": str(decision_id)})
+        if is_live:
+            try:
+                from app.services.visitor_lifecycle_service import VisitorLifecycleService
+                with self._session_factory() as db:
+                    changed_entry_id = VisitorLifecycleService(db).process(event_id)
+                    db.commit()
+                if changed_entry_id is not None and self._access_sync_callback is not None:
+                    self._access_sync_callback(changed_entry_id)
+            except Exception:
+                logger.exception("Visitor lifecycle update failed after durable parking commit", extra={"event_id": str(event_id)})

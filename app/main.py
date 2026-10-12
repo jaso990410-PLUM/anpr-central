@@ -16,6 +16,7 @@ from app.api.mqtt_settings import router as mqtt_settings_router
 from app.api.operations import router as operations_router
 from app.api.live_status import router as live_status_router
 from app.api.recognition import router as recognition_router
+from app.api.residential import router as residential_router
 from app.api.pages import login_redirect_for, router as pages_router
 from app.api.peripheral_presets import router as peripheral_presets_router
 from app.api.parking import router as parking_router
@@ -70,6 +71,7 @@ app.include_router(mqtt_settings_router)
 app.include_router(operations_router)
 app.include_router(live_status_router)
 app.include_router(recognition_router)
+app.include_router(residential_router)
 app.include_router(pages_router)
 app.include_router(peripheral_presets_router)
 app.include_router(parking_router)

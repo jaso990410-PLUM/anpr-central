@@ -365,6 +365,7 @@ class MqttHeartbeatService:
             self._parking_events = ParkingEventCoordinator(
                 self._session_factory,
                 action_callback=self._dispatch_decision_actions,
+                access_sync_callback=lambda entry_id: self.enqueue_access_entry(entry_id),
             )
             self._recognition_worker = RecognitionWorker(
                 session_factory=self._session_factory,

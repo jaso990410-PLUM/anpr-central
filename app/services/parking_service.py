@@ -34,19 +34,19 @@ class ParkingService:
         return tuple(self.db.scalars(select(Site).order_by(Site.code)).all())
 
     def on_site(self, site_id: UUID | None = None):
-        query = select(ParkingSession).options(joinedload(ParkingSession.vehicle), joinedload(ParkingSession.site), joinedload(ParkingSession.access_profile)).where(ParkingSession.status.in_(("OPEN", "OVERSTAY"))).order_by(ParkingSession.entered_at.desc())
+        query = select(ParkingSession).options(joinedload(ParkingSession.vehicle), joinedload(ParkingSession.site), joinedload(ParkingSession.access_profile), joinedload(ParkingSession.visitor_reservation)).where(ParkingSession.status.in_(("OPEN", "OVERSTAY"))).order_by(ParkingSession.entered_at.desc())
         if site_id:
             query = query.where(ParkingSession.site_id == site_id)
         return tuple(self._session(item) for item in self.db.scalars(query).unique().all())
 
     def history(self, site_id: UUID | None = None):
-        query = select(ParkingSession).options(joinedload(ParkingSession.vehicle), joinedload(ParkingSession.site), joinedload(ParkingSession.access_profile)).order_by(ParkingSession.entered_at.desc()).limit(500)
+        query = select(ParkingSession).options(joinedload(ParkingSession.vehicle), joinedload(ParkingSession.site), joinedload(ParkingSession.access_profile), joinedload(ParkingSession.visitor_reservation)).order_by(ParkingSession.entered_at.desc()).limit(500)
         if site_id:
             query = query.where(ParkingSession.site_id == site_id)
         return tuple(self._session(item) for item in self.db.scalars(query).unique().all())
 
     def get_session(self, session_id: UUID):
-        item = self.db.scalar(select(ParkingSession).options(joinedload(ParkingSession.vehicle), joinedload(ParkingSession.site), joinedload(ParkingSession.access_profile)).where(ParkingSession.id == session_id))
+        item = self.db.scalar(select(ParkingSession).options(joinedload(ParkingSession.vehicle), joinedload(ParkingSession.site), joinedload(ParkingSession.access_profile), joinedload(ParkingSession.visitor_reservation)).where(ParkingSession.id == session_id))
         return self._session(item) if item else None
 
     def alerts(self):
@@ -227,7 +227,9 @@ class ParkingService:
             "overstay_due": _display(item.overstay_due_at, tz) if item.overstay_due_at else None, "source": item.source,
             "normal_exit_policy": item.effective_normal_exit_policy, "expired_exit_policy": item.effective_expired_exit_policy,
             "overstay_exit_policy": item.effective_overstay_exit_policy, "blacklist_exit_policy": item.effective_blacklist_exit_policy,
-            "overstay_exit_grace_minutes": item.effective_overstay_exit_grace_minutes}
+            "overstay_exit_grace_minutes": item.effective_overstay_exit_grace_minutes,
+            "visitor": item.visitor_reservation.visitor_name if item.visitor_reservation else None,
+            "visitor_reservation_id": item.visitor_reservation_id}
 
 
 def _display(value, timezone_name):
