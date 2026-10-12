@@ -80,7 +80,9 @@ def test_operations_console_permission_filters_and_missing_images(client: TestCl
     assert "Lane Operations" in page.text and "Recent Lane Events" in page.text
     assert "Scene snapshot unavailable" in page.text and "Plate crop unavailable" in page.text
     assert "Raw plate" in page.text and "Effective plate" in page.text
-    assert "PREVIEW ONLY" in page.text
+    assert "PREVIEW ONLY" not in page.text
+    assert "Movement direction</dt><dd>Unknown" in page.text
+    assert "LIVE MODE" in page.text and "Auto-follow latest is on" in page.text
     assert "Correct Plate" not in page.text and "Open Barrier" not in page.text
     assert client.get("/api/operations/recent").status_code == 200
 
@@ -116,6 +118,22 @@ def test_plate_correction_route_enforces_permission_csrf_and_audits(client: Test
     assert decision.decision == "REVIEW"
     assert db.scalar(select(AuditLog).where(AuditLog.action == "recognition.plate_corrected")) is not None
     assert db.scalar(select(BarrierAction)) is None and db.scalar(select(ParkingSession)) is None
+    corrected_page = client.get(f"/operations/events/{recognized.id}")
+    assert "PREVIEW ONLY" in corrected_page.text
+    assert "Camera read <strong>WQT4I20</strong>" in corrected_page.text
+
+
+def test_historical_event_is_clearly_distinct_from_live_mode(client: TestClient, db: Session) -> None:
+    create_user(db, ("operations.view",)); _, entry, _ = seed(db)
+    older = event(db, entry, "OLD123", at=datetime.now(timezone.utc) - timedelta(hours=2))
+    event(db, entry, "NEW123", at=datetime.now(timezone.utc))
+    login(client)
+
+    page = client.get(f"/operations/events/{older.id}")
+
+    assert page.status_code == 200
+    assert "HISTORICAL EVENT" in page.text and "Return to Live" in page.text
+    assert "Auto-follow latest is on" not in page.text
 
 
 def test_reconciliation_route_is_independent_and_audited(client: TestClient, db: Session) -> None:

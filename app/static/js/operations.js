@@ -2,6 +2,8 @@
     "use strict";
     const live = document.querySelector("[data-operations-live]");
     const recent = document.querySelector("[data-operations-recent]");
+    const operations = document.querySelector("[data-auto-follow]");
+    const autoFollow = operations?.dataset.autoFollow === "true";
     const ages = document.querySelectorAll("[data-event-age]");
     const formatAge = (seconds) => seconds < 60 ? `${seconds} seconds ago` : seconds < 3600 ? `${Math.floor(seconds / 60)} minutes ago` : `${Math.floor(seconds / 3600)} hours ago`;
     const updateAges = () => ages.forEach((node) => {
@@ -49,7 +51,7 @@
             const captured = document.createElement("span");
             captured.textContent = event.captured;
             const statuses = document.createElement("div");
-            statuses.append(badge(event.decision, event.decision === "ALLOW" ? "online" : event.decision === "DENY" ? "critical" : "warning"));
+            statuses.append(badge(event.decision, event.decision === "ALLOW" ? "online" : event.decision === "DENY" ? "critical" : event.decision.startsWith("LEGACY") ? "neutral" : "warning"));
             if (event.exception) statuses.append(badge(event.exception, "warning"));
             if (event.watch) statuses.append(badge("WATCH", "critical"));
             link.append(plateLine, camera, captured, statuses);
@@ -63,15 +65,35 @@
             if (!response.ok) throw new Error("operations poll failed");
             const payload = await response.json();
             const known = new Set([...recent.querySelectorAll("[data-event-id]")].map((row) => row.dataset.eventId));
-            live.textContent = payload.events.some((event) => !known.has(event.id)) ? "UPDATED" : "LIVE";
+            const hasNewEvent = payload.events.some((event) => !known.has(event.id));
+            if (autoFollow && hasNewEvent && payload.events[0]?.id) {
+                const next = new URL(window.location.href);
+                next.pathname = "/operations";
+                next.searchParams.set("event", payload.events[0].id);
+                window.location.assign(next);
+                return;
+            }
+            if (autoFollow) live.textContent = hasNewEvent ? "UPDATED" : "LIVE MODE";
             renderRows(payload.events);
-            live.className = "status-badge status-badge--online";
+            if (autoFollow) live.className = "status-badge status-badge--online";
         } catch (_error) {
-            live.textContent = "RETRYING";
-            live.className = "status-badge status-badge--warning";
+            if (autoFollow) {
+                live.textContent = "RETRYING";
+                live.className = "status-badge status-badge--warning";
+            }
         } finally {
             window.setTimeout(poll, interval);
         }
     }
     window.setTimeout(poll, interval);
+
+    document.querySelectorAll("[data-open-dialog]").forEach((button) => button.addEventListener("click", () => {
+        document.getElementById(button.dataset.openDialog)?.showModal();
+    }));
+    document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => {
+        button.closest("dialog")?.close();
+    }));
+    document.querySelectorAll("dialog").forEach((dialog) => dialog.addEventListener("click", (event) => {
+        if (event.target === dialog) dialog.close();
+    }));
 })();

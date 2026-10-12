@@ -28,6 +28,10 @@ class SimilarPlate:
     sources: tuple[str, ...]
     reference_name: str | None = None
 
+    @property
+    def match_label(self) -> str:
+        return "Very close" if self.score <= 1 else ("Close" if self.score <= 2 else "Possible match")
+
 
 class OperationsService:
     def __init__(self, db: Session) -> None:
@@ -53,7 +57,7 @@ class OperationsService:
         query_text: str = "",
         date_from: date | None = None,
         date_to: date | None = None,
-        limit: int = 50,
+        limit: int = 15,
     ) -> tuple[dict[str, object], ...]:
         query = (
             select(RecognitionEvent, Camera, Site, AccessDecision, ParkingSessionIssue, VehicleWatch)
@@ -147,6 +151,7 @@ class OperationsService:
             "barrier_state": barrier_state,
             "reconciliations": reconciliations,
             "preview": preview,
+            "movement_direction": _movement_direction(event),
             "captured_display": self._display(event.captured_at or event.received_at, event.site.timezone),
             "captured_iso": _utc(event.captured_at or event.received_at).isoformat(),
             "scene_url": f"/recognition/{event.id}/image/scene" if event.scene_image_path else None,
@@ -209,10 +214,11 @@ class OperationsService:
                 scored.append(SimilarPlate(candidate, score, tuple(sorted(metadata["sources"])), metadata["name"]))
         return tuple(sorted(scored, key=lambda item: (item.score, item.plate))[:limit])
 
-    def previous_visits(self, event: RecognitionEvent, *, limit: int = 30) -> tuple[dict[str, object], ...]:
+    def previous_visits(self, event: RecognitionEvent, *, limit: int = 5) -> tuple[dict[str, object], ...]:
         plate = effective_plate(self.db, event)
         rows = self.db.scalars(select(RecognitionEvent).where(
             RecognitionEvent.site_id == event.site_id,
+            RecognitionEvent.id != event.id,
             or_(
                 RecognitionEvent.plate_text == plate,
                 RecognitionEvent.id.in_(select(RecognitionPlateCorrection.recognition_event_id).where(RecognitionPlateCorrection.corrected_plate_normalized == plate)),
@@ -236,6 +242,17 @@ class OperationsService:
                 "barrier": barrier.trigger_source.replace("_", " ").title() if barrier else "None",
             })
         return tuple(result)
+
+    def previous_visit_count(self, event: RecognitionEvent) -> int:
+        plate = effective_plate(self.db, event)
+        return self.db.scalar(select(func.count()).select_from(RecognitionEvent).where(
+            RecognitionEvent.site_id == event.site_id,
+            RecognitionEvent.id != event.id,
+            or_(
+                RecognitionEvent.plate_text == plate,
+                RecognitionEvent.id.in_(select(RecognitionPlateCorrection.recognition_event_id).where(RecognitionPlateCorrection.corrected_plate_normalized == plate)),
+            ),
+        )) or 0
 
     def active_watch(self, site_id: UUID, plate: str) -> VehicleWatch | None:
         return self.db.scalar(select(VehicleWatch).where(VehicleWatch.site_id == site_id, VehicleWatch.plate_normalized == plate, VehicleWatch.active.is_(True)))
@@ -285,7 +302,7 @@ class OperationsService:
             "camera_state": camera.connection_state or "UNKNOWN",
             "lane_role": camera.lane_role,
             "site": site.code,
-            "decision": decision.decision if decision else "PENDING",
+            "decision": decision.decision if decision else "LEGACY / NOT EVALUATED",
             "session": issue.issue_type.replace("_", " ").title() if issue and issue.status == "OPEN" else "Normal",
             "exception": issue.issue_type.replace("_", " ").title() if issue and issue.status == "OPEN" else None,
             "watch": watch.severity.replace("_", " ").title() if watch else None,
@@ -319,6 +336,12 @@ def _weighted_distance(left: str, right: str) -> int:
 def _similarity_label(left: str, right: str) -> str:
     score = _weighted_distance(left, right)
     return "Exact" if score == 0 else ("Close" if score <= 2 else "Possible")
+
+
+def _movement_direction(event: RecognitionEvent) -> str:
+    metadata = event.event_metadata or {}
+    value = str(metadata.get("motion_direction") or "").strip().upper()
+    return value.title() if value in {"UP", "DOWN", "LEFT", "RIGHT"} else "Unknown"
 
 
 def _utc(value: datetime) -> datetime:

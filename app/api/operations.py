@@ -57,6 +57,7 @@ def _context(request: Request, db: Session, user: User) -> dict[str, object]:
         "can_manage_access": user_has_permission(user, "access_list.manage"),
         "can_operate_barrier": user_has_permission(user, "barrier.operate"),
         "can_manage_reviews": user_has_permission(user, "parking.manage"),
+        "mqtt_connected": mqtt_heartbeat_service.is_connected,
         "live_poll_seconds": settings.live_poll_seconds,
     }
 
@@ -79,7 +80,7 @@ def _render_operations(
     status_code: int = 200,
 ) -> HTMLResponse:
     service = OperationsService(db)
-    recent = service.recent(site_id=site_id, camera_id=camera_id, lane_role=lane_role, decision=decision, exceptions_only=exceptions_only, query_text=query_text, date_from=date_from, date_to=date_to)
+    recent = service.recent(site_id=site_id, camera_id=camera_id, lane_role=lane_role, decision=decision, exceptions_only=exceptions_only, query_text=query_text, date_from=date_from, date_to=date_to, limit=15)
     if selected_event_id is None and recent:
         selected_event_id = recent[0]["id"]
     selected = service.detail(selected_event_id) if selected_event_id else None
@@ -92,8 +93,10 @@ def _render_operations(
         "recent": recent,
         "selected": selected,
         "open_candidates": service.open_session_candidates(selected["event"]) if selected and selected["event"].camera.lane_role == "EXIT" else (),
-        "similar": service.similar_plates(selected["effective_plate"], site_id=selected["event"].site_id) if selected else (),
-        "previous_visits": service.previous_visits(selected["event"]) if selected else (),
+        "similar": tuple(item for item in service.similar_plates(selected["effective_plate"], site_id=selected["event"].site_id) if item.plate != selected["effective_plate"]) if selected else (),
+        "previous_visits": service.previous_visits(selected["event"], limit=5) if selected else (),
+        "previous_visit_count": service.previous_visit_count(selected["event"]) if selected else 0,
+        "live_mode": bool(selected and recent and selected["event"].id == recent[0]["id"]),
         "filters": {"site": str(site_id) if site_id else "", "camera": str(camera_id) if camera_id else "", "lane_role": lane_role, "decision": decision, "exceptions_only": exceptions_only, "q": query_text, "date_from": date_from.isoformat() if date_from else "", "date_to": date_to.isoformat() if date_to else ""},
         "error": error,
         "action_token": uuid4().hex,
@@ -287,7 +290,7 @@ def operations_recent(
     _user: User = Depends(require_permission("operations.view")),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
-    items = OperationsService(db).recent(site_id=site, camera_id=camera, lane_role=lane_role.upper(), decision=decision.upper(), exceptions_only=exceptions_only, query_text=q, date_from=date_from, date_to=date_to, limit=50)
+    items = OperationsService(db).recent(site_id=site, camera_id=camera, lane_role=lane_role.upper(), decision=decision.upper(), exceptions_only=exceptions_only, query_text=q, date_from=date_from, date_to=date_to, limit=15)
     return {"events": [{**item, "id": str(item["id"])} for item in items]}
 
 
