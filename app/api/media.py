@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import shutil
 import subprocess
+import string
 from typing import Annotated
 from uuid import UUID
 from uuid import uuid4
@@ -95,6 +96,23 @@ def media_overview(request:Request,user:User=Depends(require_page_permission("me
         "oldest":db.scalar(select(func.min(RecordingSegment.started_at)).where(RecordingSegment.state=="COMPLETE")),
         "gaps":sum(s.recorder_state in {"DEGRADED","DISCONNECTED","ERROR"} for s in sources),"safe_stream_label":safe_stream_label})
     return templates.TemplateResponse(request=request,name="media/overview.html",context=context)
+
+
+@router.get("/storage/folders")
+def browse_storage_folders(path:str="",_user:User=Depends(require_permission("media.manage"))):
+    """Browse server-side directories without exposing files or file contents."""
+    if not path.strip():
+        roots=[Path(f"{letter}:\\") for letter in string.ascii_uppercase if Path(f"{letter}:\\").is_dir()] if __import__("os").name=="nt" else [Path("/")]
+        return {"current":None,"parent":None,"directories":[{"name":str(root),"path":str(root)} for root in roots]}
+    try:
+        current=Path(path).expanduser().resolve(strict=True)
+        if not current.is_dir(): raise HTTPException(400,"Selected path is not a directory")
+        directories=sorted((item for item in current.iterdir() if item.is_dir()),key=lambda item:item.name.casefold())
+    except HTTPException: raise
+    except (OSError,RuntimeError) as error: raise HTTPException(403,"Directory cannot be accessed by ANPR Central") from error
+    parent=current.parent if current.parent != current else None
+    return {"current":str(current),"parent":str(parent) if parent else None,
+        "directories":[{"name":item.name,"path":str(item)} for item in directories[:500]]}
 
 
 @router.post("/storage")

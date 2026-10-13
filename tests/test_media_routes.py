@@ -67,6 +67,7 @@ def test_media_pages_require_authentication_and_permission(client, db):
     assert client.get("/media").status_code == 303
     create_user(db, ("cameras.view",)); login(client)
     assert client.get("/media").status_code == 403
+    assert client.get("/media/storage/folders").status_code == 403
 
 
 def test_media_overview_and_event_render_truthful_not_configured_state(client, db):
@@ -82,12 +83,24 @@ def test_media_overview_and_event_render_truthful_not_configured_state(client, d
 def test_storage_and_source_configuration_enforce_csrf_and_hide_credentials(client, db, tmp_path):
     create_user(db, ("media.view","media.manage","cameras.view")); camera, _ = seed(db); login(client)
     page = client.get("/media"); token = csrf(page.text)
+    assert 'id="storage-root"' in page.text and "readonly" in page.text
+    assert "Browse Folders" in page.text and "media-storage-picker.js" in page.text
     assert client.post("/media/storage", data={"name":"Primary","root_path":str(tmp_path),"storage_type":"LOCAL","enabled":"true","retention_days":"30","minimum_free_space_gb":"0","minimum_free_space_percent":"0"}).status_code == 403
     created = client.post("/media/storage", data={"csrf_token":token,"name":"Primary","root_path":str(tmp_path),"storage_type":"LOCAL","enabled":"true","retention_days":"30","minimum_free_space_gb":"0","minimum_free_space_percent":"0"})
     assert created.status_code == 303
     page = client.get(f"/cameras/{camera.id}"); token = csrf(page.text)
     bad = client.post(f"/media/cameras/{camera.id}/configure", data={"csrf_token":token,"provider_type":"CENTRAL_RECORDER","recording_stream_uri":"rtsp://admin:secret@camera.local/main","credential_reference":"CAMERA_ONE","pre_event_seconds":"10","post_event_seconds":"15","segment_duration_seconds":"60","media_time_offset_ms":"0","enabled":"true","recording_enabled":"true"})
     assert bad.status_code == 400 and "admin:secret" not in bad.text
+
+
+def test_server_folder_picker_requires_manage_permission_and_lists_directories_only(client, db, tmp_path):
+    create_user(db, ("media.view","media.manage")); login(client)
+    child = tmp_path / "Recording"; child.mkdir(); (tmp_path / "secret.txt").write_text("not listed", encoding="utf-8")
+    response = client.get("/media/storage/folders", params={"path":str(tmp_path)})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["current"] == str(tmp_path.resolve())
+    assert payload["directories"] == [{"name":"Recording","path":str(child.resolve())}]
 
 
 def test_export_permission_is_separate(client, db):
