@@ -21,6 +21,7 @@ from app.services.dashboard_service import get_dashboard_summary
 from app.services.mqtt_service import mqtt_heartbeat_service
 from app.services.offline_recovery_service import OfflineRecoveryRejected
 from app.services.shell_service import build_navigation, role_label
+from app.services.media_service import MediaConfigurationService, safe_stream_label, storage_health
 from app.web import templates
 
 
@@ -210,6 +211,12 @@ def camera_detail(
             "can_view_control_board": user_has_permission(user, "control_board.view"),
             "can_view_barrier": user_has_permission(user, "cameras.view"),
             "can_delete_all_access_list": user_has_permission(user, "access_list.delete_all_camera"),
+            "can_view_media": user_has_permission(user, "media.view"),
+            "can_manage_media": user_has_permission(user, "media.manage"),
+            "media_source": MediaConfigurationService(db).source_for_camera(camera.id),
+            "media_storages": MediaConfigurationService(db).storages(),
+            "safe_stream_label": safe_stream_label,
+            "storage_health": storage_health,
         }
     )
     return templates.TemplateResponse(

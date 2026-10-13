@@ -17,6 +17,7 @@ from app.models.recognition_event import RecognitionEvent
 from app.models.site import Site
 from app.models.vehicle import Vehicle
 from app.models.residential import VisitorReservation
+from app.services.media_service import EventMediaService
 from app.services.access_list_service import AccessListValidationError, normalize_plate
 from app.services.parking_service import ParkingService, ParkingValidationError
 from app.services.plate_correction_service import PlateCorrectionService, effective_plate
@@ -141,6 +142,14 @@ class OperationsService:
                 VisitorReservation.valid_from <= captured,
                 VisitorReservation.valid_until >= captured,
             ).order_by(VisitorReservation.expected_arrival_at, VisitorReservation.created_at))
+        media_reference = EventMediaService(self.db).for_event(event.id)
+        media_anchor = _utc(event.captured_at or event.received_at)
+        media = {
+            "status": media_reference.status if media_reference else "NOT_CONFIGURED",
+            "full_start": (media_anchor - timedelta(minutes=15)).isoformat().replace("+00:00", "Z"),
+            "full_end": (media_anchor + timedelta(minutes=15)).isoformat().replace("+00:00", "Z"),
+            "live_available": bool(media_reference and media_reference.source and media_reference.source.enabled),
+        }
         try:
             preview = ParkingService(self.db).simulate(site_id=event.site_id, camera_id=event.camera_id, plate=plate, evaluated_at=datetime.now(timezone.utc))
         except ParkingValidationError:
@@ -162,6 +171,7 @@ class OperationsService:
             "barrier_state": barrier_state,
             "reconciliations": reconciliations,
             "visitor": visitor,
+            "media": media,
             "preview": preview,
             "movement_direction": _movement_direction(event),
             "captured_display": self._display(event.captured_at or event.received_at, event.site.timezone),

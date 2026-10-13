@@ -1,0 +1,6 @@
+{% extends "base_app.html" %}
+{% block title %}{{ camera.code }} Live &middot; ANPR Central{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">On-demand ANPR view</p><h1>{{ camera.code }} Live</h1><p>{{ camera.name }} &middot; the proxy runs only while this view is open</p></div><span class="status-badge status-badge--online">LIVE VIEW</span></header>
+<section class="ops-panel"><header class="panel-header"><div><p class="panel-kicker">Authenticated media proxy</p><h2>Camera Stream</h2></div></header><video controls autoplay muted playsinline preload="none" src="/media/cameras/{{ camera.id }}/live-stream" style="width:100%;max-height:70vh;background:#05080d"></video><p class="panel-note">The browser never receives the RTSP URI or camera credentials. H.264 is remuxed when possible; other codecs are transcoded only while this view is active.</p></section>
+{% endblock %}

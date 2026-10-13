@@ -371,7 +371,7 @@ class MqttHeartbeatService:
                 session_factory=self._session_factory,
                 command_manager=self._command_manager,
                 peripheral_event_callback=self._control_board_runtime.handle_recognition,
-                business_event_callback=self._parking_events.process_event,
+                business_event_callback=self._process_recognition_business_event,
                 recovery_result_callback=self._offline_recovery.record_message,
             )
             self._recognition_worker.start()
@@ -714,6 +714,18 @@ class MqttHeartbeatService:
                 self._barrier_actions.create_automatic(decision_id)
             except Exception:
                 logger.exception("Automatic barrier action failed", extra={"decision_id": str(decision_id)})
+
+    def _process_recognition_business_event(self, event_id: UUID) -> None:
+        """Keep parking and lightweight media intent isolated after event commit."""
+        if self._parking_events is not None:
+            try: self._parking_events.process_event(event_id)
+            except Exception: logger.exception("Parking event processing failed", extra={"event_id": str(event_id)})
+        try:
+            from app.services.media_service import EventMediaService
+            with self._session_factory() as db:
+                EventMediaService(db).ensure_reference(event_id); db.commit()
+        except Exception:
+            logger.exception("Media reference creation failed without affecting recognition", extra={"event_id": str(event_id)})
 
 
 def _connection_error(reason_code: Any) -> str:

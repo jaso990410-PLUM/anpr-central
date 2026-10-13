@@ -45,6 +45,9 @@ DEFAULT_PERMISSIONS = {
     "residential.manage": "Manage residential identity and vehicle relationships",
     "visitor.manage": "Create and manage visitor reservations",
     "visitor.approve": "Approve and reject visitor reservations",
+    "media.view": "View ANPR recording and playback",
+    "media.export": "Export and download ANPR evidence",
+    "media.manage": "Configure ANPR recording, storage, and evidence holds",
 }
 
 

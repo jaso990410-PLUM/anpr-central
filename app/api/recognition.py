@@ -16,6 +16,7 @@ from app.dependencies.auth import require_page_permission, require_permission, u
 from app.models.camera import Camera
 from app.models.recognition_event import RecognitionEvent
 from app.models.user import User
+from app.models.media import EventMediaReference
 from app.services.dashboard_service import get_dashboard_summary
 from app.services.recognition_media_service import (
     RecognitionMediaError,
@@ -76,6 +77,10 @@ def recognition_history(
         date_to=date_to,
         page=page,
     )
+    event_ids = [UUID(item["id"]) for item in result.items]
+    media_states = {str(item.recognition_event_id): item.status for item in db.scalars(select(EventMediaReference).where(EventMediaReference.recognition_event_id.in_(event_ids))).all()} if event_ids else {}
+    for item in result.items:
+        item["media_status"] = media_states.get(item["id"], "NOT_CONFIGURED")
     raw_session_token = request.cookies[settings.session_cookie_name]
     query_values = {
         "plate": (plate or "").strip(),
@@ -110,6 +115,7 @@ def recognition_history(
             "can_view_parking": user_has_permission(user, "parking.view"),
             "can_view_operations": user_has_permission(user, "operations.view"),
             "can_correct_plate": user_has_permission(user, "recognition.correct"),
+            "can_view_media": user_has_permission(user, "media.view"),
         },
     )
 

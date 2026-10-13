@@ -59,6 +59,7 @@ def _context(request: Request, db: Session, user: User) -> dict[str, object]:
         "can_operate_barrier": user_has_permission(user, "barrier.operate"),
         "can_manage_reviews": user_has_permission(user, "parking.manage"),
         "can_manage_visitors": user_has_permission(user, "visitor.manage"),
+        "can_view_media": user_has_permission(user, "media.view"),
         "mqtt_connected": mqtt_heartbeat_service.is_connected,
         "live_poll_seconds": settings.live_poll_seconds,
     }

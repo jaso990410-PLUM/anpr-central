@@ -50,6 +50,7 @@
         </header>
 
         <div class="evidence-grid"><div class="evidence-frame evidence-frame--scene">{% if selected.scene_url %}<img src="{{ selected.scene_url }}" alt="Scene captured for {{ selected.raw_plate }}">{% else %}<span>Scene snapshot unavailable</span>{% endif %}</div><div class="evidence-frame evidence-frame--plate">{% if selected.plate_url %}<img src="{{ selected.plate_url }}" alt="Plate crop showing {{ selected.raw_plate }}">{% else %}<span>Plate crop unavailable</span>{% endif %}</div></div>
+        {% if can_view_media %}<div class="panel-actions"><a class="button-secondary" href="/media/events/{{ selected.event.id }}">Event Video &middot; {{ selected.media.status|replace('_',' ')|title }}</a><a class="button-quiet" href="/media/cameras/{{ selected.event.camera_id }}?start={{ selected.media.full_start }}&amp;end={{ selected.media.full_end }}">View Full Recording</a>{% if selected.media.live_available %}<a class="button-quiet" href="/media/cameras/{{ selected.event.camera_id }}/live">View Live</a>{% endif %}</div>{% endif %}
 
         <section class="decision-strip" aria-label="Operational decision summary">
             <div><span>Vehicle</span><strong class="plate-value">{{ selected.effective_plate }}</strong></div>

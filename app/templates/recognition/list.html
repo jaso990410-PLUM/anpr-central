@@ -25,7 +25,7 @@
     <header class="panel-header"><div><p class="panel-kicker">Operational events</p><h2 id="recognition-table-title">Recognition feed</h2></div><span class="status-badge status-badge--neutral">Page {{ result.page }} / {{ result.page_count }}</span></header>
     <div class="table-wrap">
         <table class="data-table recognition-table">
-            <thead><tr><th>Plate</th><th>Camera</th><th>Site</th><th>Lane</th><th>Source</th><th>Access</th>{% if can_view_parking %}<th>Decision</th>{% endif %}<th>Confidence</th><th>Detected</th><th>Status</th><th>Images</th></tr></thead>
+            <thead><tr><th>Plate</th><th>Camera</th><th>Site</th><th>Lane</th><th>Source</th><th>Access</th>{% if can_view_parking %}<th>Decision</th>{% endif %}<th>Confidence</th><th>Detected</th><th>Status</th><th>Evidence</th></tr></thead>
             <tbody data-recognition-rows>
                 {% for event in result.items %}
                 <tr data-event-id="{{ event.id }}">
@@ -38,7 +38,7 @@
                     <td class="data-text" data-field="confidence">{{ event.confidence_display }}</td>
                     <td class="data-text" data-field="time">{{ event.captured_display }}</td>
                     <td><span class="status-badge {% if event.status == 'Complete' %}status-badge--online{% else %}status-badge--warning{% endif %}" data-field="status">{{ event.status }}</span></td>
-                    <td data-field="images">{% if event.plate_image_url %}<a class="table-link image-action" href="{{ event.plate_image_url }}" data-recognition-image data-image-label="Plate Crop · {{ event.plate }}">Plate Crop</a>{% endif %}{% if event.scene_image_url %}{% if event.plate_image_url %}<span class="image-action-separator">·</span>{% endif %}<a class="table-link image-action" href="{{ event.scene_image_url }}" data-recognition-image data-image-label="Scene · {{ event.plate }}">Scene</a>{% endif %}{% if not event.plate_image_url and not event.scene_image_url %}<span class="text-muted">Unavailable</span>{% endif %}</td>
+                    <td data-field="images">{% if event.plate_image_url %}<a class="table-link image-action" href="{{ event.plate_image_url }}" data-recognition-image data-image-label="Plate Crop · {{ event.plate }}">Plate Crop</a>{% endif %}{% if event.scene_image_url %}{% if event.plate_image_url %}<span class="image-action-separator">·</span>{% endif %}<a class="table-link image-action" href="{{ event.scene_image_url }}" data-recognition-image data-image-label="Scene · {{ event.plate }}">Scene</a>{% endif %}{% if can_view_media %}<span class="image-action-separator">·</span><a class="table-link" href="/media/events/{{ event.id }}">Video: {{ event.media_status|replace('_',' ')|title }}</a>{% elif not event.plate_image_url and not event.scene_image_url %}<span class="text-muted">Unavailable</span>{% endif %}</td>
                 </tr>
                 {% else %}<tr class="empty-row" data-empty-row><td colspan="11"><div class="empty-state"><strong>No recognition events found</strong><span>Events will appear when an enabled camera publishes native recognition results.</span></div></td></tr>{% endfor %}
             </tbody>

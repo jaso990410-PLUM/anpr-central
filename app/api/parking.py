@@ -30,7 +30,8 @@ def _context(request, db, user, active_page):
     raw = request.cookies[settings.session_cookie_name]
     return {"request": request, "user": user, "csrf_token": generate_csrf_token(raw),
         "summary": get_dashboard_summary(db), "active_page": active_page, "navigation": build_navigation(user),
-        "user_role_label": role_label(user), "mqtt_connected": mqtt_heartbeat_service.is_connected}
+        "user_role_label": role_label(user), "mqtt_connected": mqtt_heartbeat_service.is_connected,
+        "can_view_media": user_has_permission(user, "media.view")}
 
 
 @router.get("/parking/on-site", response_class=HTMLResponse)
