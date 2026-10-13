@@ -45,7 +45,11 @@ def _audit(db,request,user,action,entity_type,entity_id,details=None,site_id=Non
 
 
 def _parse_utc(value:str) -> datetime:
-    parsed=datetime.fromisoformat(value.replace("Z","+00:00"))
+    clean=value.strip().replace("Z","+00:00")
+    # In URL query strings an unescaped plus is decoded as a space. Accept
+    # links generated before playback timestamps were percent-encoded.
+    clean=re.sub(r" (?=\d{2}:\d{2}$)", "+", clean)
+    parsed=datetime.fromisoformat(clean)
     return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
 
 
@@ -151,15 +155,20 @@ def save_storage(request:Request,name:Annotated[str,Form()],root_path:Annotated[
 def camera_recordings(camera_id:UUID,request:Request,start:str="",end:str="",user:User=Depends(require_page_permission("media.view")),db:Session=Depends(get_db)):
     camera=db.get(Camera,camera_id)
     if camera is None: raise HTTPException(404,"Camera not found")
-    availability=None; markers=()
+    availability=None; markers=(); start_value=""; end_value=""; playback_start=""; playback_end=""
     if start and end:
         try:
             start_at=_parse_utc(start); end_at=_parse_utc(end)
             availability=MediaPlaybackService(db).historical(camera_id,start_at,end_at)
             markers=tuple(db.scalars(select(RecognitionEvent).where(RecognitionEvent.camera_id==camera_id,RecognitionEvent.captured_at>=start_at,RecognitionEvent.captured_at<=end_at).order_by(RecognitionEvent.captured_at)).all())
+            start_value=start_at.replace(tzinfo=None).isoformat()
+            end_value=end_at.replace(tzinfo=None).isoformat()
+            playback_start=start_at.isoformat().replace("+00:00","Z")
+            playback_end=end_at.isoformat().replace("+00:00","Z")
         except (ValueError,MediaValidationError) as error: raise HTTPException(400,str(error)) from error
     context=_context(request,db,user); context.update({"camera":camera,"source":MediaConfigurationService(db).source_for_camera(camera_id),"availability":availability,"markers":markers,
-        "start":start.replace("Z", ""),"end":end.replace("Z", ""),"max_playback_minutes":settings.media_max_playback_minutes})
+        "start":start_value,"end":end_value,"playback_start":playback_start,"playback_end":playback_end,
+        "max_playback_minutes":settings.media_max_playback_minutes})
     return templates.TemplateResponse(request=request,name="media/camera.html",context=context)
 
 

@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.security import hash_password
+from app.api.media import _parse_utc
 from app.db.dependencies import get_db
 from app.main import app
 from app.models.camera import Camera
@@ -79,6 +80,28 @@ def test_media_overview_and_event_render_truthful_not_configured_state(client, d
     assert page.status_code == 200
     assert "NOT CONFIGURED" in page.text and "Continuous recording was not configured" in page.text
     assert "rtsp://" not in page.text
+
+
+def test_media_time_parser_recovers_legacy_unescaped_positive_offset():
+    parsed = _parse_utc("2026-10-13T21:37:42.379026 08:00")
+
+    assert parsed == datetime(2026, 10, 13, 13, 37, 42, 379026, tzinfo=timezone.utc)
+
+
+def test_recording_page_normalizes_legacy_offset_query_to_utc(client, db):
+    create_user(db, ("media.view",)); camera, _ = seed(db); login(client)
+
+    response = client.get(
+        f"/media/cameras/{camera.id}",
+        params={
+            "start": "2026-10-13T21:37:42.379026 08:00",
+            "end": "2026-10-13T21:38:42.379026 08:00",
+        },
+    )
+
+    assert response.status_code == 200
+    assert 'value="2026-10-13T13:37:42.379026"' in response.text
+    assert 'value="2026-10-13T13:38:42.379026"' in response.text
 
 
 def test_dashboard_live_view_uses_enabled_sources_without_exposing_rtsp(client, db):
