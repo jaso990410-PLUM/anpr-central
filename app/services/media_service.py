@@ -134,6 +134,22 @@ class EventMediaService:
 class MediaPlaybackService:
     def __init__(self, db: Session): self.db=db
 
+    def live_sources(self) -> tuple[MediaSource, ...]:
+        return tuple(
+            self.db.scalars(
+                select(MediaSource)
+                .options(joinedload(MediaSource.camera))
+                .join(MediaSource.camera)
+                .where(
+                    MediaSource.enabled.is_(True),
+                    MediaSource.provider_type == "CENTRAL_RECORDER",
+                    (MediaSource.live_stream_uri.is_not(None))
+                    | (MediaSource.recording_stream_uri.is_not(None)),
+                )
+                .order_by(Camera.code)
+            ).all()
+        )
+
     def event_playback(self, event_id: UUID):
         ref = EventMediaService(self.db).for_event(event_id)
         if ref is None: raise MediaValidationError("Recognition event not found")

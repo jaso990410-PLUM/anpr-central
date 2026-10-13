@@ -122,6 +122,47 @@
 </section>
 {% endif %}
 
+{% if can_view_media %}
+<section class="ops-panel" aria-labelledby="dashboard-live-title" data-dashboard-live>
+    <header class="panel-header">
+        <div>
+            <p class="panel-kicker">On-demand monitoring</p>
+            <h2 id="dashboard-live-title">Live Camera View</h2>
+        </div>
+        <span class="status-badge status-badge--neutral" data-dashboard-live-status>IDLE</span>
+    </header>
+    {% if live_media_sources %}
+    <div class="directory-search" style="align-items:flex-end;margin-bottom:1rem">
+        <div class="field-group" style="flex:1 1 18rem">
+            <label for="dashboard-live-camera">Camera</label>
+            <select id="dashboard-live-camera" data-live-camera-select>
+                {% for source in live_media_sources %}
+                <option value="{{ source.camera_id }}" data-stream-url="/media/cameras/{{ source.camera_id }}/live-stream" data-view-url="/media/cameras/{{ source.camera_id }}/live">
+                    {{ source.camera.code }} &mdash; {{ source.camera.name }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        <button class="button-primary" type="button" data-live-start>Start Live View</button>
+        <button class="button-secondary" type="button" data-live-stop disabled>Stop</button>
+    </div>
+    <div data-live-video-shell hidden>
+        <video controls muted playsinline preload="none" data-dashboard-live-video style="display:block;width:100%;max-height:58vh;background:#05080d"></video>
+        <div class="panel-actions" style="margin-top:0.75rem">
+            <span class="panel-note" data-live-message>The stream runs only while this viewer is active.</span>
+            <a class="button-quiet" href="/media" data-live-dedicated>Open dedicated view</a>
+        </div>
+    </div>
+    <p class="panel-note">Video is delivered through the authenticated ANPR Central proxy. Camera RTSP addresses and credentials are not exposed to the browser.</p>
+    {% else %}
+    <div class="empty-state">
+        <strong>No live camera sources configured</strong>
+        <span>Enable a Central Recorder media source on a camera before using dashboard live view.</span>
+    </div>
+    {% endif %}
+</section>
+{% endif %}
+
 <section class="dashboard-grid">
     <article class="ops-panel activity-panel" aria-labelledby="camera-status-title">
         <header class="panel-header">
@@ -197,4 +238,7 @@
 </section>
 {% endblock %}
 
-{% block scripts %}<script src="{{ url_for('static', path='/js/live.js') }}" defer></script>{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', path='/js/live.js') }}" defer></script>
+{% if can_view_media %}<script src="{{ url_for('static', path='/js/dashboard-live-view.js') }}" defer></script>{% endif %}
+{% endblock %}

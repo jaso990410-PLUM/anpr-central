@@ -12,6 +12,7 @@ from app.core.security import hash_password
 from app.db.dependencies import get_db
 from app.main import app
 from app.models.camera import Camera
+from app.models.media import MediaSource
 from app.models.permission import Permission
 from app.models.recognition_event import RecognitionEvent
 from app.models.role import Role
@@ -78,6 +79,34 @@ def test_media_overview_and_event_render_truthful_not_configured_state(client, d
     assert page.status_code == 200
     assert "NOT CONFIGURED" in page.text and "Continuous recording was not configured" in page.text
     assert "rtsp://" not in page.text
+
+
+def test_dashboard_live_view_uses_enabled_sources_without_exposing_rtsp(client, db):
+    create_user(db, ("media.view",)); camera, _ = seed(db)
+    db.add(MediaSource(camera_id=camera.id, provider_type="CENTRAL_RECORDER", enabled=True,
+        recording_stream_uri="rtsp://camera.local/main", recorder_state="RECORDING"))
+    db.commit(); login(client)
+
+    dashboard = client.get("/dashboard")
+
+    assert dashboard.status_code == 200
+    assert "Live Camera View" in dashboard.text
+    assert camera.code in dashboard.text
+    assert f'/media/cameras/{camera.id}/live-stream' in dashboard.text
+    assert "dashboard-live-view.js" in dashboard.text
+    assert "rtsp://camera.local/main" not in dashboard.text
+    assert 'data-dashboard-live-video' in dashboard.text
+    assert 'data-dashboard-live-video src=' not in dashboard.text
+
+
+def test_dashboard_hides_live_view_without_media_permission(client, db):
+    create_user(db, ("cameras.view",)); seed(db); login(client)
+
+    dashboard = client.get("/dashboard")
+
+    assert dashboard.status_code == 200
+    assert "Live Camera View" not in dashboard.text
+    assert "dashboard-live-view.js" not in dashboard.text
 
 
 def test_storage_and_source_configuration_enforce_csrf_and_hide_credentials(client, db, tmp_path):
