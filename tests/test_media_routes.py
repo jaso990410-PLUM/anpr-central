@@ -101,6 +101,14 @@ def test_server_folder_picker_requires_manage_permission_and_lists_directories_o
     payload = response.json()
     assert payload["current"] == str(tmp_path.resolve())
     assert payload["directories"] == [{"name":"Recording","path":str(child.resolve())}]
+    page = client.get("/media"); token = csrf(page.text)
+    assert client.post("/media/storage/folders", data={"parent_path":str(tmp_path),"folder_name":"Created Folder"}).status_code == 403
+    created = client.post("/media/storage/folders", data={"csrf_token":token,"parent_path":str(tmp_path),"folder_name":"Created Folder"})
+    assert created.status_code == 200 and (tmp_path / "Created Folder").is_dir()
+    traversal = client.post("/media/storage/folders", data={"csrf_token":token,"parent_path":str(tmp_path),"folder_name":"../escape"})
+    assert traversal.status_code == 400 and not (tmp_path.parent / "escape").exists()
+    duplicate = client.post("/media/storage/folders", data={"csrf_token":token,"parent_path":str(tmp_path),"folder_name":"Created Folder"})
+    assert duplicate.status_code == 409
 
 
 def test_export_permission_is_separate(client, db):

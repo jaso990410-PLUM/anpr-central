@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import string
+import re
 from typing import Annotated
 from uuid import UUID
 from uuid import uuid4
@@ -113,6 +114,27 @@ def browse_storage_folders(path:str="",_user:User=Depends(require_permission("me
     parent=current.parent if current.parent != current else None
     return {"current":str(current),"parent":str(parent) if parent else None,
         "directories":[{"name":item.name,"path":str(item)} for item in directories[:500]]}
+
+
+@router.post("/storage/folders")
+def create_storage_folder(request:Request,parent_path:Annotated[str,Form()],folder_name:Annotated[str,Form()],
+                          user:User=Depends(require_page_permission("media.manage")),_csrf:str=Depends(require_session_csrf),db:Session=Depends(get_db)):
+    name=folder_name.strip()
+    invalid_windows_name=re.search(r'[<>:"/\\|?*]',name) or name.endswith((" ","."))
+    reserved=name.upper().split(".",1)[0] in {"CON","PRN","AUX","NUL",*(f"COM{i}" for i in range(1,10)),*(f"LPT{i}" for i in range(1,10))}
+    if not name or len(name)>100 or name in {".",".."} or invalid_windows_name or reserved:
+        raise HTTPException(400,"Enter a valid folder name without path separators")
+    try:
+        parent=Path(parent_path).expanduser().resolve(strict=True)
+        if not parent.is_dir(): raise HTTPException(400,"Current path is not a directory")
+        child=(parent/name).resolve(strict=False)
+        if child.parent != parent: raise HTTPException(400,"Folder must be created inside the current directory")
+        child.mkdir()
+    except FileExistsError as error: raise HTTPException(409,"A folder with this name already exists") from error
+    except HTTPException: raise
+    except (OSError,RuntimeError) as error: raise HTTPException(403,"ANPR Central cannot create a folder in this directory") from error
+    _audit(db,request,user,"media.storage_folder_created","media_storage_folder",child,{"parent":str(parent),"name":name}); db.commit()
+    return {"name":name,"path":str(child)}
 
 
 @router.post("/storage")

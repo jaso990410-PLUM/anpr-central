@@ -7,6 +7,7 @@
     const currentLabel = dialog.querySelector("[data-folder-current]");
     const list = dialog.querySelector("[data-folder-list]");
     const upButton = dialog.querySelector("[data-folder-up]");
+    const createButton = dialog.querySelector("[data-folder-create]");
     const selectButton = dialog.querySelector("[data-folder-select]");
     const cancelButton = dialog.querySelector("[data-folder-cancel]");
     const error = dialog.querySelector("[data-folder-error]");
@@ -31,6 +32,7 @@
             currentLabel.textContent = currentPath || "Select a drive";
             upButton.disabled = !parentPath;
             selectButton.disabled = !currentPath;
+            createButton.disabled = !currentPath;
             list.replaceChildren();
             payload.directories.forEach((folder) => {
                 const button = document.createElement("button");
@@ -57,6 +59,28 @@
         load(target.value || "");
     });
     upButton.addEventListener("click", () => parentPath && load(parentPath));
+    createButton.addEventListener("click", async () => {
+        if (!currentPath) return;
+        const name = window.prompt("New folder name");
+        if (!name || !name.trim()) return;
+        error.hidden = true;
+        const csrf = document.querySelector('form[action="/media/storage"] input[name="csrf_token"]')?.value;
+        const body = new URLSearchParams({parent_path: currentPath, folder_name: name.trim(), csrf_token: csrf || ""});
+        try {
+            const response = await fetch("/media/storage/folders", {
+                method: "POST",
+                headers: {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"},
+                credentials: "same-origin",
+                body,
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.detail || "The folder could not be created.");
+            await load(payload.path);
+        } catch (reason) {
+            error.textContent = reason.message;
+            error.hidden = false;
+        }
+    });
     cancelButton.addEventListener("click", () => dialog.close());
     selectButton.addEventListener("click", () => {
         if (!currentPath) return;
