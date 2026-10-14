@@ -19,6 +19,7 @@ from app.services.playback_artifact_service import (
     EventPlaybackArtifactService,
     cleanup_expired_playback_artifacts,
 )
+from app.services.playback_workspace_service import local_day_bounds, merge_coverage, site_zone
 from app.services.recorder_service import _recording_segment_start_state, apply_retention, process_exports
 
 
@@ -82,6 +83,21 @@ def test_segment_coverage_full_partial_gap_and_boundaries(db, tmp_path):
     assert provider.get_recording_availability(item.id, base, base + timedelta(seconds=120)).status == "AVAILABLE"
     assert provider.get_recording_availability(item.id, base - timedelta(seconds=10), base + timedelta(seconds=10)).status == "PARTIAL"
     assert provider.get_recording_availability(item.id, base + timedelta(seconds=120), base + timedelta(seconds=130)).status == "UNAVAILABLE"
+
+
+def test_playback_workspace_coverage_keeps_gaps_and_uses_site_timezone(db, tmp_path):
+    item, _, source = configured_source(db, tmp_path)
+    zone = site_zone(item.site)
+    start, end = local_day_bounds(datetime(2026, 10, 15).date(), zone)
+    first = segment(db, source, start, start + timedelta(minutes=10), "one.mp4")
+    second = segment(db, source, start + timedelta(minutes=20), start + timedelta(minutes=30), "two.mp4")
+
+    ranges = merge_coverage((first, second), start, end)
+
+    assert start == datetime(2026, 10, 14, 16, tzinfo=UTC)
+    assert len(ranges) == 2
+    assert ranges[0]["end"] == "2026-10-14T16:10:00Z"
+    assert ranges[1]["start"] == "2026-10-14T16:20:00Z"
 
 
 def test_event_reference_window_and_offset_do_not_change_recognition_time(db, tmp_path):

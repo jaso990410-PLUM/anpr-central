@@ -1,0 +1,75 @@
+{% extends "base_app.html" %}
+{% block title %}Playback Workspace &middot; ANPR Central{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', path='/css/media-playback.css') }}?v=20261015.1">{% endblock %}
+{% block content %}
+<header class="page-header playback-header">
+    <div><p class="eyebrow">ANPR video investigation</p><h1>Playback Workspace</h1><p>{{ selected_site.code }} &middot; synchronized recording and recognition evidence</p></div>
+    <div class="page-header-actions"><strong class="playback-selected-time" data-selected-time>{{ selected_date_display }}</strong><a class="button-secondary" href="/media">Recorder &amp; Storage</a></div>
+</header>
+
+<div class="playback-workspace" data-playback-workspace>
+    <aside class="playback-sidebar">
+        {% if sites|length > 1 %}<section class="ops-panel playback-site-picker"><div class="field-group"><label for="playback-site">Site</label><select id="playback-site" data-playback-site>{% for site in sites %}<option value="{{ site.id }}" {% if site.id == selected_site.id %}selected{% endif %}>{{ site.code }} &middot; {{ site.name }}</option>{% endfor %}</select></div></section>{% endif %}
+        <section class="ops-panel playback-calendar" aria-labelledby="playback-calendar-title">
+            <header class="calendar-header"><button type="button" class="button-quiet" data-calendar-date="{{ previous_month }}" aria-label="Previous month">&larr;</button><h2 id="playback-calendar-title">{{ calendar_title }}</h2><button type="button" class="button-quiet" data-calendar-date="{{ next_month }}" aria-label="Next month">&rarr;</button></header>
+            <div class="calendar-weekdays" aria-hidden="true">{% for label in ('Su','Mo','Tu','We','Th','Fr','Sa') %}<span>{{ label }}</span>{% endfor %}</div>
+            <div class="calendar-grid">{% for week in calendar_weeks %}{% for day in week %}<button type="button" class="calendar-day{% if not day.in_month %} is-outside{% endif %}{% if day.selected %} is-selected{% endif %}{% if day.available %} has-recording{% endif %}" data-calendar-date="{{ day.date }}" aria-label="{{ day.date }}{% if day.available %}, recording available{% endif %}"{% if day.selected %} aria-current="date"{% endif %}><span>{{ day.day }}</span></button>{% endfor %}{% endfor %}</div>
+            <p class="calendar-legend"><i></i> Recorded footage available</p>
+        </section>
+
+        <section class="ops-panel playback-camera-picker" aria-labelledby="playback-camera-title">
+            <header class="panel-header"><div><p class="panel-kicker">Up to four</p><h2 id="playback-camera-title">Cameras</h2></div></header>
+            {% for camera in cameras %}<label class="playback-camera-option"><input type="checkbox" value="{{ camera.id }}" data-playback-camera {% if camera.id|string in selected_camera_ids %}checked{% endif %}><span><strong>{{ camera.name }}</strong><small>{{ camera.code }} &middot; {{ camera_states[camera.id|string]|replace('_',' ')|title }}</small></span><i class="camera-recording-dot state-{{ camera_states[camera.id|string]|lower }}" title="{{ camera_states[camera.id|string]|replace('_',' ')|title }}"></i></label>{% else %}<div class="empty-state"><strong>No recording cameras</strong><span>Configure an enabled Central Recorder source first.</span></div>{% endfor %}
+        </section>
+
+        <details class="ops-panel playback-advanced" {% if advanced_start %}open{% endif %}>
+            <summary>Advanced Search</summary>
+            <form method="get" action="/media/playback">
+                <input type="hidden" name="site" value="{{ selected_site.id }}">
+                {% for camera in selected_cameras %}<input type="hidden" name="camera" value="{{ camera.id }}">{% endfor %}
+                <div class="field-group"><label for="advanced-start">Start ({{ selected_site.timezone }})</label><input id="advanced-start" type="datetime-local" step="1" name="start" value="{{ advanced_start }}" required></div>
+                <div class="field-group"><label for="advanced-end">End ({{ selected_site.timezone }})</label><input id="advanced-end" type="datetime-local" step="1" name="end" value="{{ advanced_end }}" required></div>
+                <button class="button-secondary" type="submit">Go to Range</button>
+                <small>Advanced ranges remain limited to {{ max_playback_minutes|default(60) }} minutes.</small>
+            </form>
+        </details>
+    </aside>
+
+    <main class="playback-main">
+        <section class="ops-panel playback-stage-panel">
+            <header class="panel-header playback-stage-header"><div><p class="panel-kicker">Shared investigation time</p><h2>{{ selected_date_display }}</h2></div><div class="layout-controls" aria-label="Camera layout"><span>Layout</span>{% for count in (1,2,4) %}<button type="button" class="button-quiet{% if selected_cameras|length == count %} is-active{% endif %}" data-layout="{{ count }}">{{ count }}</button>{% endfor %}</div></header>
+            <div class="playback-video-grid layout-{{ selected_cameras|length if selected_cameras|length in (1,2,4) else 2 }}" data-video-grid>
+                {% for camera in selected_cameras %}<article class="playback-camera-stage" data-player-stage="{{ camera.id }}"><header><div><strong>{{ camera.name }}</strong><small>{{ camera.code }}</small></div><span data-player-state>Ready</span></header><div class="playback-video-shell"><video muted playsinline preload="none" data-playback-video data-camera-id="{{ camera.id }}"></video><div class="playback-video-message" data-player-message>Select a recorded time on the timeline</div></div></article>{% else %}<div class="empty-state"><strong>No camera selected</strong><span>Select a configured recording camera.</span></div>{% endfor %}
+            </div>
+            <div class="playback-gap-notice" data-gap-notice hidden role="status"></div>
+        </section>
+
+        <section class="ops-panel playback-timeline-panel" aria-labelledby="timeline-title">
+            <header class="panel-header"><div><p class="panel-kicker">Recording coverage and ANPR activity</p><h2 id="timeline-title">Timeline</h2></div><div class="timeline-zoom"><label for="timeline-zoom">Zoom</label><select id="timeline-zoom" data-timeline-zoom>{% for value,label in (('24h','24 hours'),('6h','6 hours'),('1h','1 hour'),('15m','15 minutes')) %}<option value="{{ value }}" {% if zoom == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div></header>
+            <div class="timeline-scroll">
+                <div class="timeline-scale" data-timeline-scale></div>
+                <div class="timeline-interactive" data-timeline tabindex="0" aria-label="Recording timeline. Click or use arrow keys to choose a playback time.">
+                    {% for camera in selected_cameras %}<div class="timeline-camera-row" data-coverage-row="{{ camera.id }}"><span class="timeline-camera-label">{{ camera.name }}</span><div class="timeline-track"><div class="coverage-layer" data-coverage-layer></div><div class="marker-layer" data-marker-layer></div></div></div>{% endfor %}
+                    <div class="timeline-playhead" data-playhead><strong data-playhead-label></strong><i></i></div>
+                </div>
+            </div>
+            <div class="playback-controls">
+                <button type="button" class="button-quiet" data-previous-event title="Previous recognition">Previous Event</button>
+                <button type="button" class="button-secondary" data-skip="-10">-10s</button>
+                <button type="button" class="button-primary" data-play-toggle>Play</button>
+                <button type="button" class="button-secondary" data-skip="10">+10s</button>
+                <button type="button" class="button-quiet" data-next-event title="Next recognition">Next Event</button>
+                <label class="playback-speed">Speed <select data-playback-speed>{% for speed in ('0.5','1','2','4') %}<option value="{{ speed }}" {% if speed == '1' %}selected{% endif %}>{{ speed }}x</option>{% endfor %}</select></label>
+                <button type="button" class="button-quiet" data-fullscreen>Fullscreen</button>
+            </div>
+        </section>
+
+        <details class="ops-panel playback-events" open>
+            <summary>ANPR Events ({{ markers|length }})</summary>
+            <div class="playback-event-list" data-event-list>{% for marker in markers %}<div class="playback-event-row{% if workspace_data.event == marker.id %} is-selected{% endif %}" data-event-id="{{ marker.id }}"><button type="button" data-event-time="{{ marker.at }}"><time>{{ marker.local_time }}</time><strong>{{ marker.plate }}</strong><span>{{ marker.camera }}</span><span class="status-badge status-badge--{{ 'online' if marker.decision == 'ALLOW' else 'critical' if marker.decision == 'DENY' else 'warning' }}">{{ marker.decision }}</span></button><a class="table-link" href="{{ marker.clip_url }}">Open Event Clip</a></div>{% else %}<div class="empty-state"><strong>No recognitions on this date</strong><span>Recording coverage remains available from the timeline.</span></div>{% endfor %}</div>
+        </details>
+    </main>
+</div>
+<script type="application/json" id="playback-workspace-data">{{ workspace_data|tojson }}</script>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='/js/media-playback.js') }}?v=20261015.1" defer></script>{% endblock %}

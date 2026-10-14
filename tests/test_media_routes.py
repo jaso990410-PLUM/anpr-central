@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import json
 from collections.abc import Generator
 from datetime import datetime, timedelta, timezone
 
@@ -67,8 +68,10 @@ def login(client):
 
 def test_media_pages_require_authentication_and_permission(client, db):
     assert client.get("/media").status_code == 303
+    assert client.get("/media/playback").status_code == 303
     create_user(db, ("cameras.view",)); login(client)
     assert client.get("/media").status_code == 403
+    assert client.get("/media/playback").status_code == 403
     assert client.get("/media/storage/folders").status_code == 403
 
 
@@ -99,10 +102,9 @@ def test_recording_page_normalizes_legacy_offset_query_to_utc(client, db):
         },
     )
 
-    assert response.status_code == 200
-    assert 'Start (Asia/Kuala_Lumpur)' in response.text
-    assert 'value="2026-10-13T21:37:42.379026"' in response.text
-    assert 'value="2026-10-13T21:38:42.379026"' in response.text
+    assert response.status_code == 302
+    assert response.headers["location"].startswith(f"/media/playback?camera={camera.id}")
+    assert "start=2026-10-13T21%3A37%3A42.379026%2008%3A00" in response.headers["location"]
 
 
 def test_media_time_parser_treats_naive_operator_input_as_site_time():
@@ -200,6 +202,7 @@ def test_event_video_page_is_operator_focused_and_stream_supports_ranges(
     assert camera.name in page.text and camera.code in page.text
     assert "10 sec before" in page.text and "15 sec after recognition" in page.text
     assert "Replay from Recognition" in page.text
+    assert f'/media/playback?camera={camera.id}&amp;event={event.id}&amp;zoom=15m' in page.text
     assert "Playback Details" in page.text
     assert "Protect Recording" in page.text and "Export Clip" in page.text
     assert "Queue Evidence Export" not in page.text
@@ -209,6 +212,90 @@ def test_event_video_page_is_operator_focused_and_stream_supports_ranges(
     assert stream.content == b"2345"
     assert stream.headers["accept-ranges"] == "bytes"
     assert stream.headers["content-range"] == "bytes 2-5/16"
+
+
+def test_playback_workspace_renders_calendar_gaps_markers_and_local_time(client, db):
+    create_user(db, ("media.view",))
+    camera, recognized = seed(db)
+    recognized.captured_at = datetime(2026, 10, 14, 16, 25, tzinfo=timezone.utc)
+    recognized.received_at = recognized.captured_at
+    storage = MediaStorage(name="Primary", storage_type="LOCAL", root_path="C:/private/media", enabled=True)
+    db.add(storage); db.flush()
+    source = MediaSource(camera_id=camera.id, provider_type="CENTRAL_RECORDER", enabled=True,
+        recording_enabled=True, recording_stream_uri="rtsp://camera.local/main", storage_id=storage.id,
+        recorder_state="RECORDING", media_time_offset_ms=1500)
+    db.add(source); db.flush()
+    db.add_all((
+        RecordingSegment(media_source_id=source.id, camera_id=camera.id,
+            started_at=datetime(2026, 10, 14, 16, 0, tzinfo=timezone.utc),
+            ended_at=datetime(2026, 10, 14, 16, 10, tzinfo=timezone.utc), relative_path="one.mp4", state="COMPLETE"),
+        RecordingSegment(media_source_id=source.id, camera_id=camera.id,
+            started_at=datetime(2026, 10, 14, 16, 20, tzinfo=timezone.utc),
+            ended_at=datetime(2026, 10, 14, 16, 40, tzinfo=timezone.utc), relative_path="two.mp4", state="COMPLETE"),
+    ))
+    db.commit(); login(client)
+
+    page = client.get("/media/playback", params={"camera":str(camera.id), "date":"2026-10-15", "event":str(recognized.id), "zoom":"15m"})
+
+    assert page.status_code == 200
+    assert "Playback Workspace" in page.text and "24-hour" not in page.text
+    assert "October 2026" in page.text and 'aria-current="date"' in page.text
+    assert "Recorded footage available" in page.text
+    assert camera.name in page.text and camera.code in page.text
+    assert "Timeline" in page.text and "15 minutes" in page.text
+    assert "VAB1234" in page.text and "Open Event Clip" in page.text
+    assert "Advanced Search" in page.text and "Start (Asia/Kuala_Lumpur)" in page.text
+    assert "rtsp://" not in page.text and "C:/private/media" not in page.text
+    payload_text = re.search(r'<script type="application/json" id="playback-workspace-data">(.*?)</script>', page.text, re.S).group(1)
+    payload = json.loads(payload_text)
+    assert payload["timezone"] == "Asia/Kuala_Lumpur"
+    assert len(payload["cameras"][0]["coverage"]) == 2
+    assert payload["markers"][0]["local_time"] == "00:25:00"
+    assert payload["markers"][0]["at"] == "2026-10-14T16:25:01.500000Z"
+    assert payload["playhead"] == "2026-10-14T16:24:59.500000Z"
+
+
+def test_playback_workspace_supports_multiple_cameras_and_truthful_empty_coverage(client, db):
+    create_user(db, ("media.view",)); first, _ = seed(db)
+    second = Camera(site_id=first.site_id, code="MAIN-EXIT", name="Main Exit", direction="EXIT", lane_role="EXIT", is_enabled=True)
+    db.add(second); db.flush()
+    storage = MediaStorage(name="Primary", storage_type="LOCAL", root_path="C:/private/media", enabled=True)
+    db.add(storage); db.flush()
+    db.add_all((
+        MediaSource(camera_id=first.id, provider_type="CENTRAL_RECORDER", enabled=True, recording_enabled=True,
+            recording_stream_uri="rtsp://camera.local/entry", storage_id=storage.id, recorder_state="RECORDING"),
+        MediaSource(camera_id=second.id, provider_type="CENTRAL_RECORDER", enabled=True, recording_enabled=True,
+            recording_stream_uri="rtsp://camera.local/exit", storage_id=storage.id, recorder_state="RECORDING"),
+    ))
+    db.commit(); login(client)
+
+    page = client.get("/media/playback", params=[("camera",str(first.id)),("camera",str(second.id)),("date","2026-10-15")])
+
+    assert page.status_code == 200
+    assert 'class="playback-video-grid layout-2"' in page.text
+    assert page.text.count("data-playback-video") == 2
+    payload_text = re.search(r'<script type="application/json" id="playback-workspace-data">(.*?)</script>', page.text, re.S).group(1)
+    payload = json.loads(payload_text)
+    assert len(payload["cameras"]) == 2
+    assert all(camera["coverage"] == [] for camera in payload["cameras"])
+    assert "has-recording" not in page.text
+
+
+def test_playback_workspace_keeps_advanced_bounded_range_as_secondary_workflow(client, db):
+    create_user(db, ("media.view",)); camera, _ = seed(db)
+    storage = MediaStorage(name="Primary", storage_type="LOCAL", root_path="C:/private/media", enabled=True)
+    db.add(storage); db.flush()
+    source = MediaSource(camera_id=camera.id, provider_type="CENTRAL_RECORDER", enabled=True,
+        recording_enabled=True, recording_stream_uri="rtsp://camera.local/main", storage_id=storage.id,
+        recorder_state="RECORDING")
+    db.add(source); db.commit(); login(client)
+
+    page = client.get("/media/playback", params={"camera":str(camera.id), "start":"2026-10-15T00:10:00", "end":"2026-10-15T00:20:00"})
+
+    assert page.status_code == 200
+    assert '<details class="ops-panel playback-advanced" open>' in page.text
+    assert 'value="2026-10-15T00:10:00"' in page.text
+    assert 'value="2026-10-15T00:20:00"' in page.text
 
 
 def test_camera_settings_present_operator_workflow_without_null_values(client, db):

@@ -1,0 +1,314 @@
+(() => {
+    "use strict";
+    const root = document.querySelector("[data-playback-workspace]");
+    const dataNode = document.getElementById("playback-workspace-data");
+    if (!root || !dataNode) return;
+    const data = JSON.parse(dataNode.textContent);
+    const dayStart = Date.parse(data.dayStart);
+    const dayEnd = Date.parse(data.dayEnd);
+    const timeline = root.querySelector("[data-timeline]");
+    const playhead = root.querySelector("[data-playhead]");
+    const playheadLabel = root.querySelector("[data-playhead-label]");
+    const selectedTime = document.querySelector("[data-selected-time]");
+    const scale = root.querySelector("[data-timeline-scale]");
+    const gapNotice = root.querySelector("[data-gap-notice]");
+    const players = [...root.querySelectorAll("[data-playback-video]")];
+    const zoomSelect = root.querySelector("[data-timeline-zoom]");
+    const zoomDurations = { "24h": dayEnd - dayStart, "6h": 21600000, "1h": 3600000, "15m": 900000 };
+    let masterTime = Math.min(dayEnd - 1, Math.max(dayStart, Date.parse(data.playhead)));
+    let selectedEvent = data.event;
+    let playing = false;
+    let syncing = false;
+    let viewStart = dayStart;
+    let viewEnd = dayEnd;
+
+    const cameraData = new Map(data.cameras.map((camera) => [camera.id, camera]));
+    const formatDateTime = (epoch) => new Intl.DateTimeFormat("en-GB", {
+        timeZone: data.timezone, day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+    }).format(new Date(epoch)).replace(",", " ·");
+    const formatTime = (epoch) => new Intl.DateTimeFormat("en-GB", {
+        timeZone: data.timezone, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+    }).format(new Date(epoch));
+    const iso = (epoch) => new Date(epoch).toISOString();
+    const clamp = (value, lower, upper) => Math.min(upper, Math.max(lower, value));
+    const rangesFor = (cameraId) => (cameraData.get(cameraId)?.coverage || []).map((range) => ({ start: Date.parse(range.start), end: Date.parse(range.end) }));
+    const containingRange = (cameraId, epoch) => rangesFor(cameraId).find((range) => epoch >= range.start && epoch < range.end);
+
+    function setView() {
+        const duration = zoomDurations[zoomSelect?.value || data.zoom] || zoomDurations["24h"];
+        if (duration >= dayEnd - dayStart) {
+            viewStart = dayStart;
+            viewEnd = dayEnd;
+        } else {
+            viewStart = clamp(masterTime - duration / 2, dayStart, dayEnd - duration);
+            viewEnd = viewStart + duration;
+        }
+    }
+
+    function position(epoch) {
+        return (epoch - viewStart) / (viewEnd - viewStart) * 100;
+    }
+
+    function renderScale() {
+        if (!scale) return;
+        scale.replaceChildren();
+        const tickCount = 4;
+        for (let index = 0; index <= tickCount; index += 1) {
+            const tick = document.createElement("span");
+            const epoch = viewStart + (viewEnd - viewStart) * index / tickCount;
+            tick.style.left = `${index / tickCount * 100}%`;
+            tick.textContent = formatTime(epoch);
+            scale.append(tick);
+        }
+    }
+
+    function renderTimeline() {
+        setView();
+        renderScale();
+        root.querySelectorAll("[data-coverage-row]").forEach((row) => {
+            const cameraId = row.dataset.coverageRow;
+            const coverageLayer = row.querySelector("[data-coverage-layer]");
+            const markerLayer = row.querySelector("[data-marker-layer]");
+            coverageLayer.replaceChildren();
+            markerLayer.replaceChildren();
+            rangesFor(cameraId).forEach((range) => {
+                const start = Math.max(range.start, viewStart);
+                const end = Math.min(range.end, viewEnd);
+                if (end <= start) return;
+                const bar = document.createElement("span");
+                bar.className = "timeline-coverage";
+                bar.style.left = `${position(start)}%`;
+                bar.style.width = `${position(end) - position(start)}%`;
+                bar.title = `Recording ${formatTime(start)}–${formatTime(end)}`;
+                coverageLayer.append(bar);
+            });
+            data.markers.filter((marker) => marker.camera_id === cameraId).forEach((marker) => {
+                const epoch = Date.parse(marker.at);
+                if (epoch < viewStart || epoch > viewEnd) return;
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = `timeline-marker${marker.id === selectedEvent ? " is-selected" : ""}`;
+                button.style.left = `${position(epoch)}%`;
+                button.dataset.eventId = marker.id;
+                button.setAttribute("aria-label", `${marker.plate}, ${marker.local_time}, ${marker.camera}, ${marker.decision}`);
+                button.title = `${marker.plate}\n${marker.local_time} · ${marker.camera}\n${marker.decision}${marker.source === "OFFLINE_RECOVERY" ? " · Offline recovery" : ""}${marker.corrected ? `\nCorrected from ${marker.raw_plate}` : ""}`;
+                button.addEventListener("click", (event) => {
+                    event.stopPropagation();
+                    selectMarker(marker);
+                });
+                button.addEventListener("dblclick", () => window.location.assign(marker.clip_url));
+                markerLayer.append(button);
+            });
+        });
+        updatePlayhead();
+    }
+
+    function updatePlayhead() {
+        const percent = clamp(position(masterTime), 0, 100);
+        if (playhead) playhead.style.left = `calc(7rem + (100% - 7rem) * ${percent / 100})`;
+        if (playheadLabel) playheadLabel.textContent = formatTime(masterTime);
+        if (selectedTime) selectedTime.textContent = formatDateTime(masterTime);
+    }
+
+    function updateUrl() {
+        const url = new URL(window.location.href);
+        url.searchParams.set("date", new Intl.DateTimeFormat("en-CA", { timeZone: data.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(masterTime)));
+        url.searchParams.set("time", iso(masterTime));
+        url.searchParams.set("zoom", zoomSelect?.value || "24h");
+        url.searchParams.delete("start");
+        url.searchParams.delete("end");
+        if (selectedEvent) url.searchParams.set("event", selectedEvent); else url.searchParams.delete("event");
+        window.history.replaceState({}, "", url);
+    }
+
+    function showGap(message) {
+        if (!gapNotice) return;
+        gapNotice.textContent = message;
+        gapNotice.hidden = false;
+    }
+
+    function clearGap() {
+        if (gapNotice) gapNotice.hidden = true;
+    }
+
+    function loadPlayers(epoch, autoplay = false) {
+        masterTime = clamp(epoch, dayStart, dayEnd - 1);
+        clearGap();
+        const advancedEnd = data.advancedEnd ? Date.parse(data.advancedEnd) : null;
+        players.forEach((video) => {
+            const cameraId = video.dataset.cameraId;
+            const stage = video.closest("[data-player-stage]");
+            const message = stage.querySelector("[data-player-message]");
+            const state = stage.querySelector("[data-player-state]");
+            const range = containingRange(cameraId, masterTime);
+            if (!range) {
+                video.pause();
+                video.removeAttribute("src");
+                video.load();
+                message.textContent = `No recording available at ${formatTime(masterTime)}`;
+                message.hidden = false;
+                state.textContent = "No footage";
+                return;
+            }
+            const clipStart = masterTime;
+            const clipEnd = Math.min(range.end, advancedEnd || Infinity, clipStart + 15 * 60 * 1000);
+            video.dataset.windowStart = String(clipStart);
+            video.dataset.windowEnd = String(clipEnd);
+            video.src = `/media/cameras/${encodeURIComponent(cameraId)}/playback?start=${encodeURIComponent(iso(clipStart))}&end=${encodeURIComponent(iso(clipEnd))}`;
+            video.playbackRate = Number(root.querySelector("[data-playback-speed]")?.value || 1);
+            message.textContent = "Preparing recording…";
+            message.hidden = false;
+            state.textContent = "Preparing";
+            video.load();
+            video.addEventListener("loadedmetadata", () => {
+                message.hidden = true;
+                state.textContent = "Recorded";
+                if (autoplay) video.play().catch(() => {});
+            }, { once: true });
+        });
+        playing = autoplay;
+        const toggle = root.querySelector("[data-play-toggle]");
+        if (toggle) toggle.textContent = playing ? "Pause" : "Play";
+        renderTimeline();
+        updateUrl();
+    }
+
+    function seek(epoch, autoplay = playing) {
+        const master = players[0];
+        const start = Number(master?.dataset.windowStart);
+        const end = Number(master?.dataset.windowEnd);
+        if (master && Number.isFinite(start) && epoch >= start && epoch < end) {
+            masterTime = epoch;
+            let reloadRequired = false;
+            players.forEach((video) => {
+                const windowStart = Number(video.dataset.windowStart);
+                const windowEnd = Number(video.dataset.windowEnd);
+                if (Number.isFinite(windowStart) && epoch >= windowStart && epoch < windowEnd) {
+                    video.currentTime = (epoch - windowStart) / 1000;
+                    if (autoplay) video.play().catch(() => {});
+                } else {
+                    reloadRequired = true;
+                }
+            });
+            if (reloadRequired) {
+                loadPlayers(epoch, autoplay);
+                return;
+            }
+            renderTimeline();
+            updateUrl();
+        } else {
+            loadPlayers(epoch, autoplay);
+        }
+    }
+
+    function selectMarker(marker) {
+        selectedEvent = marker.id;
+        root.querySelectorAll(".playback-event-row").forEach((row) => row.classList.toggle("is-selected", row.dataset.eventId === marker.id));
+        seek(Date.parse(marker.at) - 2000, true);
+    }
+
+    function eventRelative(direction) {
+        const ordered = [...data.markers].sort((left, right) => Date.parse(left.at) - Date.parse(right.at));
+        const candidates = direction < 0 ? ordered.filter((item) => Date.parse(item.at) < masterTime).reverse() : ordered.filter((item) => Date.parse(item.at) > masterTime);
+        if (candidates[0]) selectMarker(candidates[0]);
+    }
+
+    function timelineEpoch(clientX) {
+        const track = timeline.querySelector(".timeline-track");
+        const rect = track.getBoundingClientRect();
+        return viewStart + clamp((clientX - rect.left) / rect.width, 0, 1) * (viewEnd - viewStart);
+    }
+
+    timeline?.addEventListener("pointerdown", (event) => {
+        if (event.target.closest(".timeline-marker")) return;
+        timeline.setPointerCapture(event.pointerId);
+        seek(timelineEpoch(event.clientX), false);
+    });
+    timeline?.addEventListener("pointermove", (event) => {
+        if (timeline.hasPointerCapture(event.pointerId)) seek(timelineEpoch(event.clientX), false);
+    });
+    timeline?.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+        event.preventDefault();
+        seek(masterTime + (event.key === "ArrowRight" ? 10000 : -10000), false);
+    });
+
+    zoomSelect?.addEventListener("change", () => { renderTimeline(); updateUrl(); });
+    root.querySelectorAll("[data-skip]").forEach((button) => button.addEventListener("click", () => seek(masterTime + Number(button.dataset.skip) * 1000)));
+    root.querySelector("[data-previous-event]")?.addEventListener("click", () => eventRelative(-1));
+    root.querySelector("[data-next-event]")?.addEventListener("click", () => eventRelative(1));
+    root.querySelector("[data-play-toggle]")?.addEventListener("click", () => {
+        playing = !playing;
+        players.forEach((video) => playing ? video.play().catch(() => {}) : video.pause());
+        root.querySelector("[data-play-toggle]").textContent = playing ? "Pause" : "Play";
+    });
+    root.querySelector("[data-playback-speed]")?.addEventListener("change", (event) => players.forEach((video) => { video.playbackRate = Number(event.target.value); }));
+    root.querySelector("[data-fullscreen]")?.addEventListener("click", () => root.querySelector("[data-video-grid]")?.requestFullscreen?.());
+
+    players.forEach((video, index) => {
+        video.addEventListener("timeupdate", () => {
+            if (index !== 0 || syncing || !Number.isFinite(Number(video.dataset.windowStart))) return;
+            syncing = true;
+            masterTime = Number(video.dataset.windowStart) + video.currentTime * 1000;
+            players.slice(1).forEach((peer) => {
+                const peerStart = Number(peer.dataset.windowStart);
+                const target = (masterTime - peerStart) / 1000;
+                if (Number.isFinite(target) && Math.abs(peer.currentTime - target) > 1.5 && target >= 0 && target <= peer.duration) peer.currentTime = target;
+            });
+            updatePlayhead();
+            syncing = false;
+        });
+        video.addEventListener("ended", () => {
+            if (index !== 0) return;
+            const currentRange = containingRange(video.dataset.cameraId, masterTime);
+            const windowEnd = Number(video.dataset.windowEnd);
+            if (currentRange && Number.isFinite(windowEnd) && windowEnd < currentRange.end - 500) {
+                loadPlayers(windowEnd, true);
+                return;
+            }
+            const next = rangesFor(video.dataset.cameraId).find((range) => range.start >= (currentRange?.end || windowEnd || masterTime));
+            if (next && playing) {
+                showGap(`Recording gap: ${formatTime(currentRange.end)}–${formatTime(next.start)}. Skipping to next recorded segment.`);
+                window.setTimeout(() => loadPlayers(next.start, true), 1200);
+            }
+        });
+    });
+
+    root.querySelectorAll("[data-event-time]").forEach((button) => button.addEventListener("click", () => {
+        const marker = data.markers.find((item) => item.id === button.closest("[data-event-id]").dataset.eventId);
+        if (marker) selectMarker(marker);
+    }));
+    document.querySelectorAll("[data-calendar-date]").forEach((button) => button.addEventListener("click", () => {
+        const url = new URL(window.location.href);
+        url.searchParams.set("date", button.dataset.calendarDate);
+        ["time", "event", "start", "end"].forEach((name) => url.searchParams.delete(name));
+        window.location.assign(url);
+    }));
+    document.querySelectorAll("[data-playback-camera]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+        const checked = [...document.querySelectorAll("[data-playback-camera]:checked")];
+        if (!checked.length) { checkbox.checked = true; return; }
+        if (checked.length > 4) { checkbox.checked = false; return; }
+        const url = new URL(window.location.href);
+        url.searchParams.delete("camera");
+        checked.forEach((item) => url.searchParams.append("camera", item.value));
+        url.searchParams.delete("event");
+        window.location.assign(url);
+    }));
+    document.querySelector("[data-playback-site]")?.addEventListener("change", (event) => {
+        const url = new URL(window.location.href);
+        url.search = "";
+        url.searchParams.set("site", event.target.value);
+        window.location.assign(url);
+    });
+    root.querySelectorAll("[data-layout]").forEach((button) => button.addEventListener("click", () => {
+        const requested = Number(button.dataset.layout);
+        const options = [...document.querySelectorAll("[data-playback-camera]")];
+        if (!options.length) return;
+        options.forEach((option, index) => { option.checked = index < requested; });
+        options[0].dispatchEvent(new Event("change"));
+    }));
+
+    renderTimeline();
+    loadPlayers(masterTime, false);
+})();

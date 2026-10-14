@@ -56,7 +56,7 @@
     <div class="empty-state"><strong>Video is not configured</strong><span>Recognition snapshots remain available. Configure a stream to enable live view and recorded evidence.</span></div>
     {% endif %}
     <div class="panel-actions camera-primary-actions">
-        <a class="button-secondary" href="/media/cameras/{{ camera.id }}">Open Recording Timeline</a>
+        <a class="button-secondary" href="/media/playback?camera={{ camera.id }}">Open Playback</a>
         {% if media_source and media_source.enabled %}<a class="button-secondary" href="/media/cameras/{{ camera.id }}/live">View Live</a>{% endif %}
         {% if can_manage_media and media_source %}<form method="post" action="/media/cameras/{{ camera.id }}/test"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit">Test Stream</button></form>{% endif %}
     </div>

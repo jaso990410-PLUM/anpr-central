@@ -35,7 +35,7 @@
     <div class="panel-actions event-playback-actions">
         <button class="button-secondary" type="button" data-replay>Replay</button>
         <button class="button-secondary" type="button" data-replay-recognition>Replay from Recognition</button>
-        <a class="button-quiet" href="/media/cameras/{{ event.camera_id }}?start={{ reference.clip_start_at.isoformat()|replace('+00:00','Z')|urlencode }}&amp;end={{ reference.clip_end_at.isoformat()|replace('+00:00','Z')|urlencode }}">View Full Recording</a>
+        <a class="button-quiet" href="/media/playback?camera={{ event.camera_id }}&amp;event={{ event.id }}&amp;zoom=15m">View Full Recording</a>
     </div>
     {% if reference.status == 'PARTIAL' %}<div class="alert alert--warning"><strong>Partial recording.</strong> A recording gap exists inside this event window.</div>{% endif %}
     {% else %}

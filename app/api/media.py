@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 import shutil
 import subprocess
 import string
 import re
 from typing import Annotated
+from urllib.parse import quote
 from uuid import UUID
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
@@ -24,6 +25,7 @@ from app.dependencies.csrf import require_session_csrf
 from app.models.camera import Camera
 from app.models.media import EventMediaReference, MediaEvidenceHold, MediaExport, MediaSource, MediaStorage, RecordingSegment
 from app.models.recognition_event import RecognitionEvent
+from app.models.site import Site
 from app.models.user import User
 from app.services.audit_service import create_audit_log
 from app.services.dashboard_service import get_dashboard_summary
@@ -31,6 +33,12 @@ from app.services.media_service import EventMediaService, MediaConfigurationServ
 from app.services.playback_artifact_service import (
     EventPlaybackArtifactService,
     PlaybackArtifactError,
+)
+from app.services.playback_workspace_service import (
+    PlaybackWorkspaceService,
+    local_day_bounds,
+    site_zone,
+    utc,
 )
 from app.services.recorder_service import RecorderError, probe_stream, resolve_stream_uri
 from app.services.shell_service import build_navigation, role_label
@@ -125,7 +133,8 @@ def media_overview(request:Request,user:User=Depends(require_page_permission("me
     context=_context(request,db,user); context.update({"sources":sources,"storages":tuple((s,storage_health(s)) for s in storages),
         "recording_count":sum(s.recorder_state=="RECORDING" for s in sources),"configured_count":sum(s.recording_enabled for s in sources),
         "oldest":db.scalar(select(func.min(RecordingSegment.started_at)).where(RecordingSegment.state=="COMPLETE")),
-        "gaps":sum(s.recorder_state in {"DEGRADED","DISCONNECTED","ERROR"} for s in sources),"safe_stream_label":safe_stream_label})
+        "gaps":sum(s.recorder_state in {"DEGRADED","DISCONNECTED","ERROR"} for s in sources),"safe_stream_label":safe_stream_label,
+        "display_media_time":_display_time})
     return templates.TemplateResponse(request=request,name="media/overview.html",context=context)
 
 
@@ -177,28 +186,174 @@ def save_storage(request:Request,name:Annotated[str,Form()],root_path:Annotated[
     return RedirectResponse("/media",303)
 
 
+@router.get("/playback", response_class=HTMLResponse)
+def playback_workspace(
+    request: Request,
+    site: str = "",
+    camera: list[str] = Query(default=[]),
+    selected_date: str = Query(default="", alias="date"),
+    selected_time: str = Query(default="", alias="time"),
+    zoom: str = "24h",
+    event: str = "",
+    start: str = "",
+    end: str = "",
+    user: User = Depends(require_page_permission("media.view")),
+    db: Session = Depends(get_db),
+):
+    service = PlaybackWorkspaceService(db)
+    sites = service.sites()
+    selected_event = None
+    if event:
+        try:
+            selected_event = db.get(RecognitionEvent, UUID(event))
+        except ValueError as error:
+            raise HTTPException(400, "Select a valid recognition event") from error
+        if selected_event is None:
+            raise HTTPException(404, "Recognition event not found")
+    try:
+        requested_site_id = UUID(site) if site else None
+    except ValueError as error:
+        raise HTTPException(400, "Select a valid site") from error
+    selected_site = db.get(Site, selected_event.site_id) if selected_event else (db.get(Site, requested_site_id) if requested_site_id else None)
+    if requested_site_id and selected_site is None:
+        raise HTTPException(404, "Site not found")
+    if selected_site is None:
+        selected_site = next((candidate for candidate in sites if service.cameras(candidate.id)), sites[0] if sites else None)
+    if selected_site is None:
+        raise HTTPException(404, "No active site is available")
+    zone = site_zone(selected_site)
+    cameras = service.cameras(selected_site.id)
+    camera_by_id = {camera_row.id: camera_row for camera_row in cameras}
+    selected_camera_ids: list[UUID] = []
+    for value in camera:
+        try:
+            camera_id = UUID(value)
+        except ValueError as error:
+            raise HTTPException(400, "Select a valid camera") from error
+        if camera_id in camera_by_id and camera_id not in selected_camera_ids:
+            selected_camera_ids.append(camera_id)
+    if selected_event and selected_event.camera_id in camera_by_id:
+        selected_camera_ids = [selected_event.camera_id, *[item for item in selected_camera_ids if item != selected_event.camera_id]]
+    selected_camera_ids = selected_camera_ids[:4]
+    if not selected_camera_ids and cameras:
+        selected_camera_ids = [cameras[0].id]
+
+    playhead = None
+    if selected_event:
+        selected_source = MediaConfigurationService(db).source_for_camera(selected_event.camera_id)
+        playhead = utc(selected_event.captured_at or selected_event.received_at) + timedelta(
+            milliseconds=selected_source.media_time_offset_ms if selected_source else 0
+        ) - timedelta(seconds=2)
+    elif selected_time:
+        try:
+            playhead = _parse_utc(selected_time, naive_timezone=selected_site.timezone)
+        except ValueError as error:
+            raise HTTPException(400, "Select a valid playback time") from error
+    elif start:
+        try:
+            playhead = _parse_utc(start, naive_timezone=selected_site.timezone)
+        except ValueError as error:
+            raise HTTPException(400, "Select a valid advanced range") from error
+    if playhead is not None:
+        day = playhead.astimezone(zone).date()
+    elif selected_date:
+        try:
+            day = date.fromisoformat(selected_date)
+        except ValueError as error:
+            raise HTTPException(400, "Select a valid playback date") from error
+    else:
+        day = datetime.now(zone).date()
+    if zoom not in {"24h", "6h", "1h", "15m"}:
+        raise HTTPException(400, "Select a valid timeline zoom")
+    day_start, day_end = local_day_bounds(day, zone)
+    coverage_by_camera = {
+        camera_id: service.coverage(camera_id, day_start, day_end)
+        for camera_id in selected_camera_ids
+    }
+    if playhead is None:
+        latest = max(
+            (datetime.fromisoformat(str(item["end"]).replace("Z", "+00:00")) for ranges in coverage_by_camera.values() for item in ranges),
+            default=None,
+        )
+        playhead = (latest - timedelta(seconds=1)) if latest else datetime.combine(day, time(hour=12), zone).astimezone(timezone.utc)
+    playhead = min(max(playhead, day_start), day_end - timedelta(milliseconds=1))
+
+    advanced_end = None
+    if start or end:
+        if not start or not end or not selected_camera_ids:
+            raise HTTPException(400, "Advanced Search requires a camera, start, and end")
+        try:
+            advanced_start = _parse_utc(start, naive_timezone=selected_site.timezone)
+            advanced_end = _parse_utc(end, naive_timezone=selected_site.timezone)
+            MediaPlaybackService(db).historical(selected_camera_ids[0], advanced_start, advanced_end)
+        except (ValueError, MediaValidationError) as error:
+            raise HTTPException(400, str(error)) from error
+        playhead = advanced_start
+
+    markers = service.markers(selected_site.id, tuple(selected_camera_ids), day_start, day_end, zone)
+    selected_cameras = tuple(camera_by_id[item] for item in selected_camera_ids)
+    camera_states = {}
+    for camera_row in cameras:
+        source = MediaConfigurationService(db).source_for_camera(camera_row.id)
+        camera_states[str(camera_row.id)] = source.recorder_state if source else "NOT CONFIGURED"
+    camera_data = []
+    for camera_row in selected_cameras:
+        source = MediaConfigurationService(db).source_for_camera(camera_row.id)
+        camera_data.append({
+            "id": str(camera_row.id),
+            "name": camera_row.name,
+            "code": camera_row.code,
+            "state": source.recorder_state if source else "NOT CONFIGURED",
+            "coverage": coverage_by_camera[camera_row.id],
+        })
+    first = day.replace(day=1)
+    previous_month = (first - timedelta(days=1)).replace(day=1)
+    next_month = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
+    workspace_data = {
+        "timezone": selected_site.timezone,
+        "dayStart": day_start.isoformat().replace("+00:00", "Z"),
+        "dayEnd": day_end.isoformat().replace("+00:00", "Z"),
+        "playhead": playhead.isoformat().replace("+00:00", "Z"),
+        "zoom": zoom,
+        "event": str(selected_event.id) if selected_event else None,
+        "advancedEnd": advanced_end.isoformat().replace("+00:00", "Z") if advanced_end else None,
+        "cameras": camera_data,
+        "markers": markers,
+    }
+    context = _context(request, db, user)
+    context.update({
+        "sites": sites,
+        "selected_site": selected_site,
+        "cameras": cameras,
+        "selected_camera_ids": {str(item) for item in selected_camera_ids},
+        "selected_cameras": selected_cameras,
+        "camera_states": camera_states,
+        "selected_date": day.isoformat(),
+        "selected_date_display": day.strftime("%d %b %Y"),
+        "calendar_title": day.strftime("%B %Y"),
+        "calendar_weeks": service.calendar(selected_site, day),
+        "previous_month": previous_month.isoformat(),
+        "next_month": next_month.isoformat(),
+        "markers": markers,
+        "workspace_data": workspace_data,
+        "zoom": zoom,
+        "advanced_start": playhead.astimezone(zone).replace(tzinfo=None).isoformat(timespec="seconds") if start else "",
+        "advanced_end": advanced_end.astimezone(zone).replace(tzinfo=None).isoformat(timespec="seconds") if advanced_end else "",
+        "max_playback_minutes": settings.media_max_playback_minutes,
+    })
+    return templates.TemplateResponse(request=request, name="media/playback.html", context=context)
+
+
 @router.get("/cameras/{camera_id}",response_class=HTMLResponse)
 def camera_recordings(camera_id:UUID,request:Request,start:str="",end:str="",user:User=Depends(require_page_permission("media.view")),db:Session=Depends(get_db)):
     camera=db.get(Camera,camera_id)
     if camera is None: raise HTTPException(404,"Camera not found")
-    availability=None; markers=(); start_value=""; end_value=""; playback_start=""; playback_end=""
-    display_timezone_name=camera.site.timezone
-    try: display_timezone=ZoneInfo(display_timezone_name)
-    except ZoneInfoNotFoundError: display_timezone=timezone.utc; display_timezone_name="UTC"
-    if start and end:
-        try:
-            start_at=_parse_utc(start,naive_timezone=display_timezone_name); end_at=_parse_utc(end,naive_timezone=display_timezone_name)
-            availability=MediaPlaybackService(db).historical(camera_id,start_at,end_at)
-            markers=tuple(db.scalars(select(RecognitionEvent).where(RecognitionEvent.camera_id==camera_id,RecognitionEvent.captured_at>=start_at,RecognitionEvent.captured_at<=end_at).order_by(RecognitionEvent.captured_at)).all())
-            start_value=start_at.astimezone(display_timezone).replace(tzinfo=None).isoformat()
-            end_value=end_at.astimezone(display_timezone).replace(tzinfo=None).isoformat()
-            playback_start=start_at.isoformat().replace("+00:00","Z")
-            playback_end=end_at.isoformat().replace("+00:00","Z")
-        except (ValueError,MediaValidationError) as error: raise HTTPException(400,str(error)) from error
-    context=_context(request,db,user); context.update({"camera":camera,"source":MediaConfigurationService(db).source_for_camera(camera_id),"availability":availability,"markers":markers,
-        "start":start_value,"end":end_value,"playback_start":playback_start,"playback_end":playback_end,
-        "display_timezone_name":display_timezone_name,"max_playback_minutes":settings.media_max_playback_minutes})
-    return templates.TemplateResponse(request=request,name="media/camera.html",context=context)
+    params = [f"camera={camera_id}"]
+    if start:
+        params.append(f"start={quote(start, safe='')}")
+    if end:
+        params.append(f"end={quote(end, safe='')}")
+    return RedirectResponse(f"/media/playback?{'&'.join(params)}", status_code=302)
 
 
 @router.get("/cameras/{camera_id}/playback")
