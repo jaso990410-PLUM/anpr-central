@@ -41,7 +41,7 @@
     </form>
 </section>
 
-<div class="operations-layout" data-auto-follow="{{ 'true' if live_mode else 'false' }}">
+<div class="operations-layout" data-auto-follow="{{ 'true' if live_mode else 'false' }}"{% if selected %} data-selected-event-id="{{ selected.event.id }}" data-selected-event-version="{{ selected.updated_iso }}"{% endif %}>
     <section class="ops-panel operations-focus" aria-labelledby="selected-event-title">
         {% if selected %}
         <header class="operations-focus__header">
@@ -101,4 +101,4 @@
     <aside class="ops-panel recent-lane-events" data-operations-recent><header class="panel-header"><div><p class="panel-kicker">Latest 15</p><h2>Recent Lane Events</h2></div></header><div class="recent-event-list" data-operations-rows>{% for item in recent %}<a href="/operations/events/{{ item.id }}" class="recent-event{% if selected and selected.event.id == item.id %} is-selected{% endif %}" data-event-id="{{ item.id }}"><div><strong>{{ item.plate }}</strong>{% if item.corrected %}<small>Raw {{ item.raw_plate }}</small>{% endif %}</div><span>{{ item.camera }} &middot; {{ item.lane_role }}</span><span>{{ item.captured }}</span><div><span class="status-badge status-badge--{{ 'online' if item.decision == 'ALLOW' else 'critical' if item.decision == 'DENY' else 'neutral' if item.decision.startswith('LEGACY') else 'warning' }}">{{ item.decision }}</span>{% if item.exception %}<span class="status-badge status-badge--warning">{{ item.exception }}</span>{% endif %}{% if item.watch %}<span class="status-badge status-badge--critical">WATCH</span>{% endif %}</div></a>{% else %}<div class="empty-state">No recent events</div>{% endfor %}</div><footer class="recent-events-footer"><a class="table-link" href="/recognition">View Recognition History</a></footer></aside>
 </div>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', path='/js/operations.js') }}?v=20261012.2" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='/js/operations.js') }}?v=20261015.1" defer></script>{% endblock %}

@@ -4,6 +4,8 @@
     const recent = document.querySelector("[data-operations-recent]");
     const operations = document.querySelector("[data-auto-follow]");
     const autoFollow = operations?.dataset.autoFollow === "true";
+    const selectedEventId = operations?.dataset.selectedEventId;
+    const selectedEventVersion = operations?.dataset.selectedEventVersion;
     const ages = document.querySelectorAll("[data-event-age]");
     const formatAge = (seconds) => seconds < 60 ? `${seconds} seconds ago` : seconds < 3600 ? `${Math.floor(seconds / 60)} minutes ago` : `${Math.floor(seconds / 3600)} hours ago`;
     const updateAges = () => ages.forEach((node) => {
@@ -71,6 +73,11 @@
                 next.pathname = "/operations";
                 next.searchParams.set("event", payload.events[0].id);
                 window.location.assign(next);
+                return;
+            }
+            const selectedEvent = payload.events.find((event) => event.id === selectedEventId);
+            if (selectedEvent && selectedEvent.updated_at !== selectedEventVersion) {
+                window.location.reload();
                 return;
             }
             if (autoFollow) live.textContent = hasNewEvent ? "UPDATED" : "LIVE MODE";

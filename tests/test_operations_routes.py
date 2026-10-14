@@ -83,8 +83,12 @@ def test_operations_console_permission_filters_and_missing_images(client: TestCl
     assert "PREVIEW ONLY" not in page.text
     assert "Movement direction</dt><dd>Unknown" in page.text
     assert "LIVE MODE" in page.text and "Auto-follow latest is on" in page.text
+    assert f'data-selected-event-id="{recognized.id}"' in page.text
+    assert 'data-selected-event-version="' in page.text
     assert "Correct Plate" not in page.text and "Open Barrier" not in page.text
-    assert client.get("/api/operations/recent").status_code == 200
+    recent = client.get("/api/operations/recent")
+    assert recent.status_code == 200
+    assert recent.json()["events"][0]["updated_at"] == recognized.updated_at.replace(tzinfo=timezone.utc).isoformat()
 
 
 def test_operations_date_filters_and_blank_query_values(client: TestClient, db: Session) -> None:

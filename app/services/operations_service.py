@@ -176,6 +176,7 @@ class OperationsService:
             "movement_direction": _movement_direction(event),
             "captured_display": self._display(event.captured_at or event.received_at, event.site.timezone),
             "captured_iso": _utc(event.captured_at or event.received_at).isoformat(),
+            "updated_iso": _utc(event.updated_at).isoformat(),
             "scene_url": f"/recognition/{event.id}/image/scene" if event.scene_image_path else None,
             "plate_url": f"/recognition/{event.id}/image/plate" if event.plate_image_path else None,
         }
@@ -330,6 +331,7 @@ class OperationsService:
             "watch": watch.severity.replace("_", " ").title() if watch else None,
             "captured": self._display(event.captured_at or event.received_at, site.timezone),
             "captured_iso": _utc(event.captured_at or event.received_at).isoformat(),
+            "updated_at": _utc(event.updated_at).isoformat(),
         }
 
     @staticmethod
