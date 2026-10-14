@@ -1,13 +1,86 @@
 {% extends "base_app.html" %}
 {% block title %}{{ event.plate_text }} Event Video &middot; ANPR Central{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', path='/css/media-event.css') }}">{% endblock %}
+
 {% block content %}
-<header class="page-header"><div><p class="eyebrow">Recognition evidence</p><h1>{{ event.plate_text }}</h1><p>{{ event.camera.code }} &middot; {{ event.captured_at or event.received_at }}</p></div><span class="status-badge status-badge--{{ 'online' if reference.status == 'AVAILABLE' else 'warning' if reference.status in ['PENDING','PARTIAL'] else 'offline' if reference.status not in ['NOT_CONFIGURED'] else 'neutral' }}">{{ reference.status|replace('_',' ') }}</span></header>
+<nav class="evidence-breadcrumb" aria-label="Breadcrumb"><a href="/operations/events/{{ event.id }}">&larr; Back to Lane Operations</a></nav>
 
-<section class="ops-panel"><header class="panel-header"><div><p class="panel-kicker">Short event window</p><h2>Event Video</h2></div>{% if playback_mode %}<span class="status-badge status-badge--neutral">{{ playback_mode|replace('_',' ') }}</span>{% endif %}</header><dl class="detail-list"><div><dt>Recognition time</dt><dd class="data-text">{{ event.captured_at or event.received_at }}</dd></div><div><dt>Media anchor</dt><dd class="data-text">{{ reference.media_anchor_at }}</dd></div><div><dt>Requested window</dt><dd class="data-text">{{ reference.clip_start_at }} &rarr; {{ reference.clip_end_at }}</dd></div><div><dt>Coverage</dt><dd>{{ availability.covered_seconds|round(1) }} / {{ availability.requested_seconds|round(1) }} seconds</dd></div></dl>
-{% if reference.status == 'PENDING' %}<div class="alert alert--warning"><strong>Post-event recording is still being completed.</strong> Refresh after the end of the requested window.</div>{% elif availability.segments %}<video controls preload="metadata" src="/media/events/{{ event.id }}/stream" style="width:100%;max-height:70vh;background:#05080d"></video>{% if reference.status == 'PARTIAL' %}<div class="alert alert--warning"><strong>Partial evidence.</strong> A recording gap exists inside the requested window.</div>{% endif %}{% else %}<div class="empty-state"><strong>Video {{ reference.status|replace('_',' ')|lower }}</strong><span>{% if reference.status == 'NOT_CONFIGURED' %}Continuous recording was not configured for this camera.{% elif reference.status == 'EXPIRED' %}The recording aged out under retention policy.{% else %}No reliable recording covers this event window.{% endif %}</span></div>{% endif %}
-<div class="panel-actions"><a class="button-secondary" href="/media/cameras/{{ event.camera_id }}?start={{ reference.clip_start_at.isoformat()|replace('+00:00','Z')|urlencode }}&amp;end={{ reference.clip_end_at.isoformat()|replace('+00:00','Z')|urlencode }}">View Full Recording</a></div></section>
+<header class="page-header event-evidence-header">
+    <div>
+        <p class="eyebrow">Recognition evidence</p>
+        <h1 class="plate-value plate-value--large">{{ event.plate_text }}</h1>
+        <p><strong>{{ event.camera.name }}</strong> <span class="data-text">{{ event.camera.code }}</span></p>
+        <p class="event-time">{{ event_time_display }}</p>
+    </div>
+    <span class="status-badge status-badge--{{ 'online' if reference.status == 'AVAILABLE' else 'warning' if reference.status in ['PENDING','PARTIAL'] else 'neutral' if reference.status == 'NOT_CONFIGURED' else 'offline' }}">
+        {% if reference.status == 'AVAILABLE' %}VIDEO AVAILABLE{% elif reference.status == 'PARTIAL' %}PARTIAL RECORDING{% elif reference.status == 'PENDING' %}VIDEO PREPARING{% else %}{{ reference.status|replace('_',' ') }}{% endif %}
+    </span>
+</header>
 
-<section class="ops-panel"><header class="panel-header"><div><p class="panel-kicker">Retention protection</p><h2>Evidence Management</h2></div></header>{% if holds %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Reason</th><th>Created</th><th>Status</th><th></th></tr></thead><tbody>{% for hold in holds %}<tr><td>{{ hold.reason }}</td><td class="data-text">{{ hold.created_at }}</td><td>{{ 'Released' if hold.released_at else 'Protected' }}</td><td>{% if can_manage_media and not hold.released_at %}<form method="post" action="/media/holds/{{ hold.id }}/release"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-quiet" type="submit">Release Hold</button></form>{% endif %}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
-<div class="panel-actions">{% if can_manage_media and reference.status in ['AVAILABLE','PARTIAL'] %}<form class="inline-filter-form" method="post" action="/media/events/{{ event.id }}/protect"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div class="field-group"><label for="hold-reason">Protection reason</label><input id="hold-reason" name="reason" maxlength="500" required></div><button class="button-secondary" type="submit">Protect Evidence</button></form>{% endif %}{% if can_export_media and reference.status in ['AVAILABLE','PARTIAL'] %}<form method="post" action="/media/events/{{ event.id }}/export"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-primary" type="submit">Queue Evidence Export</button></form>{% endif %}</div>
-{% if exports %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Requested</th><th>Status</th><th>SHA-256</th><th></th></tr></thead><tbody>{% for export in exports %}<tr><td class="data-text">{{ export.created_at }}</td><td>{{ export.state }}</td><td class="data-text">{{ export.checksum_sha256 or export.error or 'Pending' }}</td><td>{% if export.state == 'COMPLETED' %}<a class="table-link" href="/media/exports/{{ export.id }}/download">Download</a>{% endif %}</td></tr>{% endfor %}</tbody></table></div>{% endif %}<p class="panel-note">Playback, protection, and export never trigger barrier or peripheral actions.</p></section>
+<section class="ops-panel event-video-panel" aria-labelledby="event-video-title">
+    <header class="panel-header"><div><p class="panel-kicker">Focused evidence</p><h2 id="event-video-title">Event Video</h2></div></header>
+    {% if reference.status == 'PENDING' %}
+    <div class="alert alert--warning"><strong>Post-event recording is still being completed.</strong> Refresh after the requested event window ends.</div>
+    {% elif reference.status in ['AVAILABLE','PARTIAL'] and availability.segments %}
+    <div class="event-video-stage">
+        <video controls autoplay muted playsinline preload="auto" src="/media/events/{{ event.id }}/stream" data-event-video data-recognition-offset="{{ recognition_offset }}"></video>
+        <div class="event-video-preparing" data-video-loading>Preparing seekable event video&hellip;</div>
+        <button class="event-play-fallback" type="button" data-play-fallback hidden>Play Event Video</button>
+    </div>
+    <div class="event-reference-timeline" aria-label="Recognition occurred {{ recognition_offset|round(1) }} seconds into this {{ clip_duration|round(1) }} second event clip">
+        <div class="event-reference-timeline__labels"><span>0:00</span><span>{{ clip_duration_display }}</span></div>
+        <div class="event-reference-timeline__track"><span class="event-reference-timeline__marker" style="left: {{ recognition_percent|round(2) }}%"><i></i><strong>Recognition</strong></span></div>
+        <p>{{ pre_event_seconds|round(0)|int }} sec before &middot; {{ post_event_seconds|round(0)|int }} sec after recognition</p>
+    </div>
+    <div class="panel-actions event-playback-actions">
+        <button class="button-secondary" type="button" data-replay>Replay</button>
+        <button class="button-secondary" type="button" data-replay-recognition>Replay from Recognition</button>
+        <a class="button-quiet" href="/media/cameras/{{ event.camera_id }}?start={{ reference.clip_start_at.isoformat()|replace('+00:00','Z')|urlencode }}&amp;end={{ reference.clip_end_at.isoformat()|replace('+00:00','Z')|urlencode }}">View Full Recording</a>
+    </div>
+    {% if reference.status == 'PARTIAL' %}<div class="alert alert--warning"><strong>Partial recording.</strong> A recording gap exists inside this event window.</div>{% endif %}
+    {% else %}
+    <div class="empty-state"><strong>Video {{ reference.status|replace('_',' ')|lower }}</strong><span>{% if reference.status == 'NOT_CONFIGURED' %}Continuous recording was not configured for this camera.{% elif reference.status == 'EXPIRED' %}The recording aged out under retention policy.{% else %}No reliable recording covers this event window.{% endif %}</span></div>
+    {% endif %}
+
+    <details class="action-drawer playback-details">
+        <summary>Playback Details</summary>
+        <dl class="detail-list">
+            <div><dt>Recognition time</dt><dd class="data-text">{{ event_time_technical }}</dd></div>
+            <div><dt>Media anchor</dt><dd class="data-text">{{ anchor_time_display }}</dd></div>
+            <div><dt>Video window</dt><dd class="data-text">{{ clip_start_display }} &rarr; {{ clip_end_display }}</dd></div>
+            <div><dt>Coverage</dt><dd>{{ "Complete" if reference.status == "AVAILABLE" else reference.status|replace('_',' ')|title }} &middot; {{ availability.covered_seconds|round(1) }} / {{ availability.requested_seconds|round(1) }} sec</dd></div>
+            <div><dt>Playback</dt><dd>Seekable MP4{% if playback_mode %} &middot; {{ playback_mode|replace('_',' ')|title }} source{% endif %}</dd></div>
+        </dl>
+    </details>
+</section>
+
+<section class="ops-panel evidence-management" aria-labelledby="evidence-management-title">
+    <header class="panel-header"><div><p class="panel-kicker">Retention and export</p><h2 id="evidence-management-title">Evidence</h2></div>{% if active_hold_count %}<span class="status-badge status-badge--active">{{ active_hold_count }} protected</span>{% endif %}</header>
+    <div class="panel-actions evidence-primary-actions">
+        {% if can_manage_media and reference.status in ['AVAILABLE','PARTIAL'] %}<button class="button-secondary" type="button" data-open-protect>Protect Recording</button>{% endif %}
+        {% if can_export_media and reference.status in ['AVAILABLE','PARTIAL'] %}<form method="post" action="/media/events/{{ event.id }}/export"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-primary" type="submit">Export Clip</button></form>{% endif %}
+    </div>
+
+    {% if holds %}
+    <details class="action-drawer"><summary>Protection History</summary><div class="table-wrap"><table class="data-table"><thead><tr><th>Reason</th><th>Created</th><th>Status</th><th></th></tr></thead><tbody>{% for hold in holds %}<tr><td>{{ hold.reason }}</td><td class="data-text">{{ hold.created_at }}</td><td>{{ 'Released' if hold.released_at else 'Protected' }}</td><td>{% if can_manage_media and not hold.released_at %}<form method="post" action="/media/holds/{{ hold.id }}/release"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-quiet" type="submit">Release Protection</button></form>{% endif %}</td></tr>{% endfor %}</tbody></table></div></details>
+    {% endif %}
+
+    {% if exports %}
+    <details class="action-drawer" open><summary>Exports</summary><div class="table-wrap"><table class="data-table"><thead><tr><th>Requested</th><th>Status</th><th>Integrity</th><th></th></tr></thead><tbody>{% for export in exports %}<tr><td class="data-text">{{ export.created_at }}</td><td>{% if export.state in ['QUEUED','PROCESSING'] %}Preparing export&hellip;{% elif export.state == 'COMPLETED' %}Export ready{% else %}{{ export.state|title }}{% endif %}</td><td class="data-text">{{ export.checksum_sha256 or export.error or 'Pending' }}</td><td>{% if export.state == 'COMPLETED' %}<a class="table-link" href="/media/exports/{{ export.id }}/download">Download</a>{% endif %}</td></tr>{% endfor %}</tbody></table></div></details>
+    {% endif %}
+
+    {% if can_manage_media and reference.status in ['AVAILABLE','PARTIAL'] %}
+    <dialog class="evidence-dialog" data-protect-dialog aria-labelledby="protect-evidence-title">
+        <form method="post" action="/media/events/{{ event.id }}/protect">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <header><p class="panel-kicker">Retention protection</p><h3 id="protect-evidence-title">Protect this evidence?</h3></header>
+            <p>Protected footage will not be removed by normal recording retention.</p>
+            <div class="field-group"><label for="hold-reason">Reason</label><input id="hold-reason" name="reason" maxlength="500" placeholder="Vehicle damage investigation" required></div>
+            <div class="dialog-actions"><button class="button-quiet" type="button" data-close-protect>Cancel</button><button class="button-primary" type="submit">Protect Evidence</button></div>
+        </form>
+    </dialog>
+    {% endif %}
+</section>
 {% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', path='/js/media-event.js') }}" defer></script>{% endblock %}

@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     media_ffmpeg_path: str = "ffmpeg"
     media_ffprobe_path: str = "ffprobe"
     media_max_playback_minutes: int = Field(default=60, ge=1, le=240)
+    media_playback_cache_minutes: int = Field(default=60, ge=5, le=1440)
     media_max_export_jobs: int = Field(default=2, ge=1, le=8)
     media_recorder_poll_seconds: int = Field(default=5, ge=1, le=60)
     media_recorder_stale_seconds: int = Field(default=180, ge=30, le=3600)

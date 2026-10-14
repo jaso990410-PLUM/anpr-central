@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Generator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,7 +13,7 @@ from app.api.media import _parse_utc
 from app.db.dependencies import get_db
 from app.main import app
 from app.models.camera import Camera
-from app.models.media import MediaSource
+from app.models.media import MediaSource, MediaStorage, RecordingSegment
 from app.models.permission import Permission
 from app.models.recognition_event import RecognitionEvent
 from app.models.role import Role
@@ -137,6 +137,78 @@ def test_dashboard_hides_live_view_without_media_permission(client, db):
     assert dashboard.status_code == 200
     assert "Live Camera View" not in dashboard.text
     assert "dashboard-live-view.js" not in dashboard.text
+
+
+def test_event_video_page_is_operator_focused_and_stream_supports_ranges(
+    client, db, tmp_path, monkeypatch
+):
+    create_user(db, ("media.view", "media.manage", "media.export"))
+    camera, event = seed(db)
+    event.captured_at = datetime.now(timezone.utc) - timedelta(minutes=2)
+    event.received_at = event.captured_at
+    storage = MediaStorage(
+        name="Primary",
+        storage_type="LOCAL",
+        root_path=str(tmp_path),
+        enabled=True,
+        minimum_free_space_gb=0,
+        minimum_free_space_percent=0,
+    )
+    db.add(storage)
+    db.flush()
+    source = MediaSource(
+        camera_id=camera.id,
+        provider_type="CENTRAL_RECORDER",
+        enabled=True,
+        recording_enabled=True,
+        recording_stream_uri="rtsp://camera.local/main",
+        storage_id=storage.id,
+        pre_event_seconds=10,
+        post_event_seconds=15,
+        recorder_state="RECORDING",
+    )
+    db.add(source)
+    db.flush()
+    captured = event.captured_at
+    db.add(
+        RecordingSegment(
+            media_source_id=source.id,
+            camera_id=camera.id,
+            started_at=captured - timedelta(seconds=30),
+            ended_at=captured + timedelta(seconds=30),
+            relative_path="segment.mp4",
+            state="COMPLETE",
+            codec="h264",
+        )
+    )
+    db.commit()
+    artifact = tmp_path / "event.mp4"
+    artifact.write_bytes(b"0123456789abcdef")
+    monkeypatch.setattr(
+        "app.api.media.EventPlaybackArtifactService.prepare",
+        lambda _self, **_kwargs: artifact,
+    )
+    login(client)
+
+    page = client.get(f"/media/events/{event.id}")
+    stream = client.get(
+        f"/media/events/{event.id}/stream", headers={"Range": "bytes=2-5"}
+    )
+
+    assert page.status_code == 200
+    assert "Back to Lane Operations" in page.text
+    assert camera.name in page.text and camera.code in page.text
+    assert "10 sec before" in page.text and "15 sec after recognition" in page.text
+    assert "Replay from Recognition" in page.text
+    assert "Playback Details" in page.text
+    assert "Protect Recording" in page.text and "Export Clip" in page.text
+    assert "Queue Evidence Export" not in page.text
+    assert "Playback, protection, and export never trigger" not in page.text
+    assert 'autoplay muted playsinline preload="auto"' in page.text
+    assert stream.status_code == 206
+    assert stream.content == b"2345"
+    assert stream.headers["accept-ranges"] == "bytes"
+    assert stream.headers["content-range"] == "bytes 2-5/16"
 
 
 def test_camera_settings_present_operator_workflow_without_null_values(client, db):

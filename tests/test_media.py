@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -14,6 +15,10 @@ from app.models.recognition_event import RecognitionEvent
 from app.models.site import Site
 from app.services.media_provider import CentralRecorderProvider
 from app.services.media_service import EventMediaService, MediaConfigurationService, MediaPlaybackService, MediaValidationError, validate_stream_uri
+from app.services.playback_artifact_service import (
+    EventPlaybackArtifactService,
+    cleanup_expired_playback_artifacts,
+)
 from app.services.recorder_service import _recording_segment_start_state, apply_retention, process_exports
 
 
@@ -116,6 +121,52 @@ def test_live_source_uses_enabled_central_recorder(db, tmp_path):
     source.enabled = False; db.commit()
     with pytest.raises(MediaValidationError, match="not configured"):
         MediaPlaybackService(db).live_source(item.id)
+
+
+def test_event_playback_artifact_is_finalized_faststart_and_cached(db, tmp_path, monkeypatch):
+    item, storage, source = configured_source(db, tmp_path)
+    start = datetime.now(UTC) - timedelta(minutes=2)
+    row = event(db, item, start + timedelta(seconds=10))
+    recorded = segment(db, source, start, start + timedelta(seconds=60))
+    (tmp_path / recorded.relative_path).write_bytes(b"source-video")
+    availability = CentralRecorderProvider(db).get_recording_availability(
+        item.id, start, start + timedelta(seconds=25)
+    )
+    commands = []
+
+    def fake_run(command, **_kwargs):
+        commands.append(command)
+        Path(command[-1]).write_bytes(b"seekable-mp4")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr("app.services.playback_artifact_service.shutil.which", lambda _name: "ffmpeg")
+    monkeypatch.setattr("app.services.playback_artifact_service.subprocess.run", fake_run)
+    service = EventPlaybackArtifactService(db)
+
+    first = service.prepare(
+        event_id=row.id,
+        camera_id=item.id,
+        start_at=start,
+        end_at=start + timedelta(seconds=25),
+        availability=availability,
+    )
+    second = service.prepare(
+        event_id=row.id,
+        camera_id=item.id,
+        start_at=start,
+        end_at=start + timedelta(seconds=25),
+        availability=availability,
+    )
+
+    assert first == second and first.read_bytes() == b"seekable-mp4"
+    assert len(commands) == 1
+    assert "+faststart" in commands[0]
+    assert commands[0][-1].endswith(".partial.mp4")
+
+    old_time = (datetime.now(UTC) - timedelta(days=2)).timestamp()
+    os.utime(first, (old_time, old_time))
+    assert cleanup_expired_playback_artifacts(db) == 1
+    assert not first.exists()
 
 
 def test_recorder_status_stays_recording_between_healthy_segments(db, tmp_path):

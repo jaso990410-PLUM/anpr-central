@@ -1,0 +1,208 @@
+.evidence-breadcrumb {
+    margin-bottom: 1rem;
+}
+
+.evidence-breadcrumb a {
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+    text-decoration: none;
+}
+
+.evidence-breadcrumb a:hover {
+    color: var(--accent-secondary);
+}
+
+.event-evidence-header {
+    align-items: flex-end;
+}
+
+.event-evidence-header h1 {
+    margin-bottom: 0.45rem;
+}
+
+.event-evidence-header p {
+    margin: 0.2rem 0 0;
+}
+
+.event-evidence-header p .data-text {
+    margin-left: 0.45rem;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+}
+
+.event-evidence-header .event-time {
+    color: var(--text-secondary);
+    font-family: var(--technical);
+}
+
+.event-video-stage {
+    position: relative;
+    display: grid;
+    place-items: center;
+    min-height: 20rem;
+    background: #05080d;
+}
+
+.event-video-stage video {
+    z-index: 1;
+    display: block;
+    width: 100%;
+    max-height: 70vh;
+    background: #05080d;
+}
+
+.event-video-preparing {
+    position: absolute;
+    color: var(--text-muted);
+    font-family: var(--technical);
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+}
+
+.event-play-fallback {
+    position: absolute;
+    z-index: 2;
+    padding: 0.85rem 1.3rem;
+    border: 1px solid rgba(47, 168, 255, 0.55);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    background: rgba(11, 17, 27, 0.9);
+    cursor: pointer;
+}
+
+.event-reference-timeline {
+    padding: 1rem 1.2rem 0.5rem;
+}
+
+.event-reference-timeline__labels {
+    display: flex;
+    justify-content: space-between;
+    color: var(--text-muted);
+    font-family: var(--technical);
+    font-size: 0.64rem;
+}
+
+.event-reference-timeline__track {
+    position: relative;
+    height: 0.25rem;
+    margin: 0.85rem 0 2.4rem;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(47, 168, 255, 0.3), rgba(69, 214, 232, 0.55));
+}
+
+.event-reference-timeline__marker {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.event-reference-timeline__marker i {
+    display: block;
+    width: 0.75rem;
+    height: 0.75rem;
+    border: 2px solid var(--surface);
+    border-radius: 50%;
+    background: var(--accent-secondary);
+    box-shadow: 0 0 0 2px rgba(69, 214, 232, 0.25);
+}
+
+.event-reference-timeline__marker strong {
+    position: absolute;
+    top: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--accent-secondary);
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.event-reference-timeline > p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    text-align: center;
+}
+
+.event-playback-actions,
+.evidence-primary-actions {
+    flex-wrap: wrap;
+}
+
+.event-playback-actions form,
+.evidence-primary-actions form {
+    margin: 0;
+}
+
+.event-video-panel > .alert {
+    margin: 1rem 1.2rem;
+}
+
+.playback-details,
+.evidence-management .action-drawer {
+    border-top: 1px solid var(--border);
+}
+
+.playback-details > summary,
+.evidence-management .action-drawer > summary {
+    padding: 0.95rem 1.2rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.playback-details > summary:hover,
+.evidence-management .action-drawer > summary:hover {
+    color: var(--text-primary);
+    background: rgba(47, 168, 255, 0.035);
+}
+
+.evidence-dialog {
+    width: min(32rem, calc(100vw - 2rem));
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    background: var(--surface-elevated);
+    box-shadow: 0 1.5rem 5rem rgba(0, 0, 0, 0.55);
+}
+
+.evidence-dialog::backdrop {
+    background: rgba(3, 7, 12, 0.78);
+    backdrop-filter: blur(3px);
+}
+
+.evidence-dialog form {
+    display: grid;
+    gap: 1rem;
+    padding: 1.25rem;
+}
+
+.evidence-dialog h3,
+.evidence-dialog p {
+    margin: 0.25rem 0 0;
+}
+
+.evidence-dialog p {
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+    line-height: 1.55;
+}
+
+.evidence-dialog .dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.65rem;
+}
+
+@media (max-width: 48rem) {
+    .event-video-stage {
+        min-height: 12rem;
+    }
+
+    .event-evidence-header {
+        align-items: flex-start;
+    }
+}

@@ -28,6 +28,10 @@ from app.models.user import User
 from app.services.audit_service import create_audit_log
 from app.services.dashboard_service import get_dashboard_summary
 from app.services.media_service import EventMediaService, MediaConfigurationService, MediaEvidenceService, MediaPlaybackService, MediaValidationError, safe_stream_label, storage_health
+from app.services.playback_artifact_service import (
+    EventPlaybackArtifactService,
+    PlaybackArtifactError,
+)
 from app.services.recorder_service import RecorderError, probe_stream, resolve_stream_uri
 from app.services.shell_service import build_navigation, role_label
 from app.web import templates
@@ -56,6 +60,23 @@ def _parse_utc(value:str, *, naive_timezone:str="UTC") -> datetime:
         except ZoneInfoNotFoundError: source_timezone=timezone.utc
         parsed=parsed.replace(tzinfo=source_timezone)
     return parsed.astimezone(timezone.utc)
+
+
+def _display_time(value: datetime, timezone_name: str, *, milliseconds: bool = False) -> str:
+    try:
+        display_timezone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        display_timezone = timezone.utc
+    local = _parse_utc(value.isoformat()).astimezone(display_timezone)
+    if milliseconds:
+        return local.strftime("%d %b %Y · %H:%M:%S.%f")[:-3]
+    return local.strftime("%d %b %Y · %H:%M:%S")
+
+
+def _display_duration(seconds: float) -> str:
+    whole_seconds = max(0, round(seconds))
+    minutes, remainder = divmod(whole_seconds, 60)
+    return f"{minutes}:{remainder:02d}"
 
 
 def _bounded_video_stream(db:Session,camera_id:UUID,start_at:datetime,end_at:datetime) -> StreamingResponse:
@@ -262,7 +283,25 @@ def event_video(event_id:UUID,request:Request,user:User=Depends(require_page_per
     ref,availability,mode=MediaPlaybackService(db).event_playback(event_id); db.commit()
     holds=tuple(db.scalars(select(MediaEvidenceHold).where(MediaEvidenceHold.recognition_event_id==event_id).order_by(MediaEvidenceHold.created_at.desc())).all())
     exports=tuple(db.scalars(select(MediaExport).where(MediaExport.recognition_event_id==event_id).order_by(MediaExport.created_at.desc())).all())
-    context=_context(request,db,user); context.update({"event":event,"reference":ref,"availability":availability,"playback_mode":mode,"holds":holds,"exports":exports})
+    event_at=event.captured_at or event.received_at
+    clip_duration=max(0.0,(ref.clip_end_at-ref.clip_start_at).total_seconds())
+    recognition_offset=max(0.0,min(clip_duration,(ref.media_anchor_at-ref.clip_start_at).total_seconds()))
+    timezone_name=event.site.timezone
+    context=_context(request,db,user); context.update({
+        "event":event,"reference":ref,"availability":availability,"playback_mode":mode,"holds":holds,"exports":exports,
+        "event_time_display":_display_time(event_at,timezone_name),
+        "event_time_technical":_display_time(event_at,timezone_name,milliseconds=True),
+        "anchor_time_display":_display_time(ref.media_anchor_at,timezone_name,milliseconds=True),
+        "clip_start_display":_display_time(ref.clip_start_at,timezone_name,milliseconds=True),
+        "clip_end_display":_display_time(ref.clip_end_at,timezone_name,milliseconds=True),
+        "clip_duration":clip_duration,
+        "clip_duration_display":_display_duration(clip_duration),
+        "recognition_offset":recognition_offset,
+        "recognition_percent":(recognition_offset/clip_duration*100) if clip_duration else 0,
+        "pre_event_seconds":recognition_offset,
+        "post_event_seconds":max(0.0,clip_duration-recognition_offset),
+        "active_hold_count":sum(hold.released_at is None for hold in holds),
+    })
     return templates.TemplateResponse(request=request,name="media/event.html",context=context)
 
 
@@ -270,7 +309,26 @@ def event_video(event_id:UUID,request:Request,user:User=Depends(require_page_per
 def event_video_stream(event_id:UUID,_user:User=Depends(require_permission("media.view")),db:Session=Depends(get_db)):
     ref,availability,_mode=MediaPlaybackService(db).event_playback(event_id)
     if availability.status not in {"AVAILABLE","PARTIAL"}: raise HTTPException(404,f"Event video is {availability.status.lower().replace('_',' ')}")
-    return _bounded_video_stream(db,ref.camera_id,ref.clip_start_at,ref.clip_end_at)
+    try:
+        artifact=EventPlaybackArtifactService(db).prepare(
+            event_id=event_id,
+            camera_id=ref.camera_id,
+            start_at=ref.clip_start_at,
+            end_at=ref.clip_end_at,
+            availability=availability,
+        )
+    except PlaybackArtifactError as error:
+        raise HTTPException(503,str(error)) from error
+    return FileResponse(
+        artifact,
+        media_type="video/mp4",
+        headers={
+            "Accept-Ranges":"bytes",
+            "Cache-Control":"private, max-age=60",
+            "X-Content-Type-Options":"nosniff",
+        },
+        content_disposition_type="inline",
+    )
 
 
 @router.get("/segments/{segment_id}")

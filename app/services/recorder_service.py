@@ -20,6 +20,7 @@ from app.core.config import settings
 from app.models.media import EventMediaReference, MediaEvidenceHold, MediaExport, MediaSource, MediaStorage, RecordingSegment
 from app.services.media_provider import CentralRecorderProvider
 from app.services.media_service import MediaPlaybackService, MediaValidationError, storage_health
+from app.services.playback_artifact_service import cleanup_expired_playback_artifacts
 from app.services.audit_service import create_audit_log
 
 logger = logging.getLogger(__name__)
@@ -143,7 +144,7 @@ class RecorderService:
             db.commit()
     def maintenance_once(self):
         with self.session_factory() as db:
-            resolve_pending_media(db); process_exports(db); apply_retention(db); db.commit()
+            resolve_pending_media(db); process_exports(db); apply_retention(db); cleanup_expired_playback_artifacts(db); db.commit()
 
 
 def resolve_pending_media(db: Session, now=None):
