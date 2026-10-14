@@ -100,8 +100,15 @@ def test_recording_page_normalizes_legacy_offset_query_to_utc(client, db):
     )
 
     assert response.status_code == 200
-    assert 'value="2026-10-13T13:37:42.379026"' in response.text
-    assert 'value="2026-10-13T13:38:42.379026"' in response.text
+    assert 'Start (Asia/Kuala_Lumpur)' in response.text
+    assert 'value="2026-10-13T21:37:42.379026"' in response.text
+    assert 'value="2026-10-13T21:38:42.379026"' in response.text
+
+
+def test_media_time_parser_treats_naive_operator_input_as_site_time():
+    parsed = _parse_utc("2026-10-14T23:09:00", naive_timezone="Asia/Kuala_Lumpur")
+
+    assert parsed == datetime(2026, 10, 14, 15, 9, tzinfo=timezone.utc)
 
 
 def test_dashboard_live_view_uses_enabled_sources_without_exposing_rtsp(client, db):

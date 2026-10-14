@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import shutil
 import subprocess
 from threading import Event, Lock, Thread
 from time import monotonic
@@ -25,6 +26,14 @@ logger = logging.getLogger(__name__)
 
 
 class RecorderError(RuntimeError): pass
+
+
+def _recording_segment_start_state(source: MediaSource) -> str:
+    if source.last_successful_segment_at is None:
+        return "STARTING"
+    if source.recorder_state in {"ERROR", "DISCONNECTED", "DEGRADED"}:
+        return "DEGRADED"
+    return "RECORDING"
 
 
 def resolve_stream_uri(source: MediaSource, *, live: bool = False) -> str:
@@ -76,15 +85,18 @@ class RecordingWorker:
             if source is None or not source.enabled or not source.recording_enabled or source.provider_type!="CENTRAL_RECORDER": self.stop.wait(2); return
             storage=db.get(MediaStorage,source.storage_id)
             if storage is None or storage_health(storage)["status"]!="HEALTHY": raise RecorderError("Recording storage is unavailable or below free-space threshold")
+            uri=resolve_stream_uri(source)
+            executable=shutil.which(settings.media_ffmpeg_path)
+            if executable is None: raise RecorderError("ffmpeg is not installed or configured")
             start=datetime.now(timezone.utc); folder=Path(str(source.camera_id))/start.strftime("%Y/%m/%d/%H")
             name=f"segment_{start.strftime('%Y%m%dT%H%M%S')}_{uuid4().hex[:8]}.mp4"; relative=(folder/name).as_posix()
             root=Path(storage.root_path).resolve(); final=(root/relative).resolve()
             if root != final and root not in final.parents: raise RecorderError("Recording path escaped the configured storage root")
             final.parent.mkdir(parents=True,exist_ok=True); temporary=final.with_suffix(".partial")
             segment=RecordingSegment(media_source_id=source.id,camera_id=source.camera_id,started_at=start,relative_path=relative,state="WRITING")
-            source.recorder_state="STARTING"; source.last_error=None; db.add(segment); db.commit(); segment_id=segment.id
-            uri=resolve_stream_uri(source); duration=source.segment_duration_seconds
-        command=[settings.media_ffmpeg_path,"-hide_banner","-loglevel","error","-rtsp_transport","tcp","-i",uri,"-map","0:v:0","-an","-c","copy","-t",str(duration),"-movflags","+faststart","-f","mp4",str(temporary)]
+            source.recorder_state=_recording_segment_start_state(source); db.add(segment); db.commit(); segment_id=segment.id
+            duration=source.segment_duration_seconds
+        command=[executable,"-hide_banner","-loglevel","error","-rtsp_transport","tcp","-i",uri,"-map","0:v:0","-an","-c","copy","-t",str(duration),"-movflags","+faststart","-f","mp4",str(temporary)]
         try: self.process=subprocess.Popen(command,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)
         except FileNotFoundError as error: raise RecorderError("ffmpeg is not installed or configured") from error
         while self.process.poll() is None and not self.stop.wait(0.5): pass
@@ -96,7 +108,7 @@ class RecordingWorker:
             if returncode==0 and temporary.is_file() and temporary.stat().st_size>0:
                 os.replace(temporary,final); segment.state="COMPLETE"; segment.ended_at=ended; segment.finalized_at=ended
                 segment.file_size_bytes=final.stat().st_size; segment.duration_ms=max(1,int((ended-_utc(segment.started_at)).total_seconds()*1000))
-                segment.codec=source.detected_codec or source.expected_codec; source.recorder_state="RECORDING"; source.last_stream_activity_at=ended
+                segment.codec=source.detected_codec or source.expected_codec; source.recorder_state="RECORDING"; source.last_error=None; source.last_stream_activity_at=ended
                 source.last_successful_segment_at=ended; source.consecutive_failures=0; storage.last_successful_write_at=ended if storage else None
             else:
                 segment.state="PARTIAL" if temporary.exists() and temporary.stat().st_size else "FAILED"; segment.ended_at=ended; segment.finalized_at=ended

@@ -9,6 +9,7 @@ import re
 from typing import Annotated
 from uuid import UUID
 from uuid import uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
@@ -44,13 +45,17 @@ def _audit(db,request,user,action,entity_type,entity_id,details=None,site_id=Non
     create_audit_log(db,action=action,actor_user_id=user.id,site_id=site_id,entity_type=entity_type,entity_id=str(entity_id),details=details,ip_address=request.client.host if request.client else None)
 
 
-def _parse_utc(value:str) -> datetime:
+def _parse_utc(value:str, *, naive_timezone:str="UTC") -> datetime:
     clean=value.strip().replace("Z","+00:00")
     # In URL query strings an unescaped plus is decoded as a space. Accept
     # links generated before playback timestamps were percent-encoded.
     clean=re.sub(r" (?=\d{2}:\d{2}$)", "+", clean)
     parsed=datetime.fromisoformat(clean)
-    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    if parsed.tzinfo is None:
+        try: source_timezone=ZoneInfo(naive_timezone)
+        except ZoneInfoNotFoundError: source_timezone=timezone.utc
+        parsed=parsed.replace(tzinfo=source_timezone)
+    return parsed.astimezone(timezone.utc)
 
 
 def _bounded_video_stream(db:Session,camera_id:UUID,start_at:datetime,end_at:datetime) -> StreamingResponse:
@@ -156,19 +161,22 @@ def camera_recordings(camera_id:UUID,request:Request,start:str="",end:str="",use
     camera=db.get(Camera,camera_id)
     if camera is None: raise HTTPException(404,"Camera not found")
     availability=None; markers=(); start_value=""; end_value=""; playback_start=""; playback_end=""
+    display_timezone_name=camera.site.timezone
+    try: display_timezone=ZoneInfo(display_timezone_name)
+    except ZoneInfoNotFoundError: display_timezone=timezone.utc; display_timezone_name="UTC"
     if start and end:
         try:
-            start_at=_parse_utc(start); end_at=_parse_utc(end)
+            start_at=_parse_utc(start,naive_timezone=display_timezone_name); end_at=_parse_utc(end,naive_timezone=display_timezone_name)
             availability=MediaPlaybackService(db).historical(camera_id,start_at,end_at)
             markers=tuple(db.scalars(select(RecognitionEvent).where(RecognitionEvent.camera_id==camera_id,RecognitionEvent.captured_at>=start_at,RecognitionEvent.captured_at<=end_at).order_by(RecognitionEvent.captured_at)).all())
-            start_value=start_at.replace(tzinfo=None).isoformat()
-            end_value=end_at.replace(tzinfo=None).isoformat()
+            start_value=start_at.astimezone(display_timezone).replace(tzinfo=None).isoformat()
+            end_value=end_at.astimezone(display_timezone).replace(tzinfo=None).isoformat()
             playback_start=start_at.isoformat().replace("+00:00","Z")
             playback_end=end_at.isoformat().replace("+00:00","Z")
         except (ValueError,MediaValidationError) as error: raise HTTPException(400,str(error)) from error
     context=_context(request,db,user); context.update({"camera":camera,"source":MediaConfigurationService(db).source_for_camera(camera_id),"availability":availability,"markers":markers,
         "start":start_value,"end":end_value,"playback_start":playback_start,"playback_end":playback_end,
-        "max_playback_minutes":settings.media_max_playback_minutes})
+        "display_timezone_name":display_timezone_name,"max_playback_minutes":settings.media_max_playback_minutes})
     return templates.TemplateResponse(request=request,name="media/camera.html",context=context)
 
 

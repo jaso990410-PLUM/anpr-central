@@ -14,7 +14,7 @@ from app.models.recognition_event import RecognitionEvent
 from app.models.site import Site
 from app.services.media_provider import CentralRecorderProvider
 from app.services.media_service import EventMediaService, MediaConfigurationService, MediaPlaybackService, MediaValidationError, validate_stream_uri
-from app.services.recorder_service import apply_retention, process_exports
+from app.services.recorder_service import _recording_segment_start_state, apply_retention, process_exports
 
 
 UTC = timezone.utc
@@ -116,6 +116,18 @@ def test_live_source_uses_enabled_central_recorder(db, tmp_path):
     source.enabled = False; db.commit()
     with pytest.raises(MediaValidationError, match="not configured"):
         MediaPlaybackService(db).live_source(item.id)
+
+
+def test_recorder_status_stays_recording_between_healthy_segments(db, tmp_path):
+    _, _, source = configured_source(db, tmp_path)
+    assert _recording_segment_start_state(source) == "STARTING"
+
+    source.last_successful_segment_at = datetime.now(UTC)
+    source.recorder_state = "STARTING"
+    assert _recording_segment_start_state(source) == "RECORDING"
+
+    source.recorder_state = "DISCONNECTED"
+    assert _recording_segment_start_state(source) == "DEGRADED"
 
 
 def test_segment_path_rejects_traversal(db, tmp_path):
