@@ -1,0 +1,320 @@
+.camera-page-header {
+    align-items: flex-end;
+}
+
+.camera-health-strip {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.camera-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin: 0;
+    border-top: 1px solid var(--border);
+}
+
+.camera-summary-grid > div {
+    min-width: 0;
+    padding: 1rem 1.2rem;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+}
+
+.camera-summary-grid > div:nth-child(3n) {
+    border-right: 0;
+}
+
+.camera-summary-grid dt,
+.clip-total span {
+    margin-bottom: 0.45rem;
+    color: var(--text-muted);
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.camera-summary-grid dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+    color: var(--text-primary);
+    font-size: 0.76rem;
+}
+
+.camera-summary-grid dd small {
+    display: block;
+    margin-top: 0.35rem;
+    color: var(--text-muted);
+    font-size: 0.62rem;
+}
+
+.action-drawer,
+.administrative-drawer {
+    border-top: 1px solid var(--border);
+}
+
+.action-drawer > summary,
+.administrative-drawer > summary,
+.nested-settings > summary {
+    padding: 0.95rem 1.2rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+
+.action-drawer > summary:hover,
+.administrative-drawer > summary:hover,
+.nested-settings > summary:hover {
+    color: var(--text-primary);
+    background: rgba(47, 168, 255, 0.035);
+}
+
+.camera-inline-settings .inline-filter-form,
+.camera-config-drawer .camera-recording-form {
+    border-top: 1px solid rgba(36, 50, 71, 0.55);
+}
+
+.camera-primary-actions {
+    flex-wrap: wrap;
+}
+
+.camera-primary-actions form {
+    margin: 0;
+}
+
+.recording-switch-row,
+.compact-operation-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    padding: 1rem 1.2rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.recording-switch-row > div,
+.compact-operation-row > div {
+    display: grid;
+    gap: 0.3rem;
+}
+
+.recording-switch-row strong,
+.compact-operation-row strong {
+    color: var(--text-primary);
+    font-size: 0.76rem;
+}
+
+.recording-switch-row small,
+.compact-operation-row span {
+    color: var(--text-muted);
+    font-size: 0.66rem;
+    line-height: 1.5;
+}
+
+.camera-recording-form > .form-grid,
+.nested-settings .form-grid {
+    padding: 1.2rem;
+}
+
+.field-group--wide {
+    grid-column: span 2;
+}
+
+.event-clip-settings {
+    margin: 0 1.2rem 1.2rem;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.event-clip-settings legend {
+    padding: 0 0.4rem;
+    color: var(--text-primary);
+    font-size: 0.76rem;
+    font-weight: 700;
+}
+
+.event-clip-settings > p {
+    margin: 0 0 1rem;
+    color: var(--text-muted);
+    font-size: 0.66rem;
+}
+
+.event-clip-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(8rem, 0.65fr);
+    align-items: end;
+    gap: 1rem;
+}
+
+.input-suffix {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-deep);
+}
+
+.input-suffix input {
+    min-width: 0;
+    border: 0;
+    background: transparent;
+}
+
+.input-suffix span {
+    padding-right: 0.8rem;
+    color: var(--text-muted);
+    font-size: 0.62rem;
+}
+
+.clip-total {
+    display: grid;
+    align-content: center;
+    min-height: 3.15rem;
+    padding: 0.55rem 0.8rem;
+    border: 1px solid rgba(47, 168, 255, 0.22);
+    border-radius: var(--radius-sm);
+    background: rgba(47, 168, 255, 0.05);
+}
+
+.clip-total span {
+    margin-bottom: 0.2rem;
+}
+
+.clip-total strong {
+    color: var(--accent-secondary);
+    font-family: var(--technical);
+    font-size: 0.78rem;
+}
+
+.nested-settings {
+    margin: 0 1.2rem 1.2rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: rgba(8, 13, 21, 0.2);
+}
+
+.nested-settings > .panel-note {
+    padding: 0 1.2rem;
+}
+
+.commissioning-note {
+    display: grid;
+    gap: 0.3rem;
+    margin: 0 1.2rem 1.2rem;
+    padding: 0.8rem 1rem;
+    border-left: 2px solid var(--warning);
+    background: rgba(241, 185, 74, 0.05);
+}
+
+.commissioning-note strong {
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+}
+
+.commissioning-note span {
+    color: var(--text-muted);
+    font-size: 0.64rem;
+}
+
+.camera-feature-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--border);
+}
+
+.camera-feature-grid article {
+    display: grid;
+    align-content: start;
+    justify-items: start;
+    gap: 0.8rem;
+    min-height: 12rem;
+    padding: 1.2rem;
+    background: var(--surface);
+}
+
+.camera-feature-grid h3 {
+    margin: 0.2rem 0 0;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.camera-feature-grid p:not(.panel-kicker) {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    line-height: 1.6;
+}
+
+.camera-feature-grid form,
+.camera-feature-grid .button-secondary {
+    margin-top: auto;
+}
+
+.danger-drawer .alert,
+.danger-drawer form {
+    margin-right: 1.2rem;
+    margin-left: 1.2rem;
+}
+
+.compact-detail-list {
+    border-top: 1px solid rgba(36, 50, 71, 0.55);
+}
+
+.camera-contained-note {
+    padding: 0 1.2rem 1.2rem;
+}
+
+.state-reference {
+    padding: 0 1.2rem 1.2rem;
+}
+
+.administrative-drawer > summary > span {
+    display: grid;
+    gap: 0.25rem;
+}
+
+.administrative-drawer > summary strong {
+    color: var(--text-primary);
+    font-size: 0.85rem;
+}
+
+@media (max-width: 72rem) {
+    .camera-summary-grid,
+    .camera-feature-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .camera-summary-grid > div:nth-child(3n) {
+        border-right: 1px solid var(--border);
+    }
+
+    .camera-summary-grid > div:nth-child(2n) {
+        border-right: 0;
+    }
+}
+
+@media (max-width: 48rem) {
+    .camera-summary-grid,
+    .camera-feature-grid,
+    .event-clip-fields {
+        grid-template-columns: 1fr;
+    }
+
+    .camera-summary-grid > div {
+        border-right: 0;
+    }
+
+    .field-group--wide {
+        grid-column: auto;
+    }
+
+    .recording-switch-row,
+    .compact-operation-row {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}

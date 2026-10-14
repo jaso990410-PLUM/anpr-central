@@ -2,194 +2,128 @@
 
 {% block title %}{{ camera.code }} &middot; ANPR Central{% endblock %}
 
+{% block styles %}
+<link rel="stylesheet" href="{{ url_for('static', path='/css/camera-detail.css') }}">
+{% endblock %}
+
 {% block content %}
-<header class="page-header">
+<header class="page-header camera-page-header">
     <div>
-        <p class="eyebrow">Camera identity</p>
+        <p class="eyebrow">Camera settings</p>
         <h1>{{ camera.code }}</h1>
-        <p>{{ camera.name }} &middot; {{ camera.site_code }}</p>
+        <p>{{ camera.name }} &middot; {{ camera.site_code }} &middot; {{ camera.site_name }}</p>
     </div>
-    <div class="page-header-actions">
-        <span class="status-badge {% if mqtt_connected %}status-badge--online{% else %}status-badge--offline{% endif %}">MQTT {{ "CONNECTED" if mqtt_connected else "DISCONNECTED" }}</span>
+    <div class="page-header-actions camera-health-strip">
+        <span class="status-badge {% if camera.is_enabled %}status-badge--active{% else %}status-badge--disabled{% endif %}">{{ "Enabled" if camera.is_enabled else "Disabled" }}</span>
         <span class="status-badge status-badge--{{ camera.connection_state|lower|replace('_', '-') }}">{{ camera.connection_state }}</span>
+        <span class="status-badge {% if mqtt_connected %}status-badge--online{% else %}status-badge--offline{% endif %}">MQTT {{ "CONNECTED" if mqtt_connected else "DISCONNECTED" }}</span>
     </div>
 </header>
 
-<div class="camera-detail-grid">
-    <section class="ops-panel camera-detail-panel" aria-labelledby="camera-general-title">
-        <header class="panel-header"><div><p class="panel-kicker">Configuration</p><h2 id="camera-general-title">General</h2></div></header>
-        <dl class="detail-list">
-            <div><dt>Site</dt><dd>{{ camera.site_code }} &middot; {{ camera.site_name }}</dd></div>
-            <div><dt>Lane role</dt><dd><span class="status-badge status-badge--{{ camera.lane_role|lower }}">{{ camera.lane_role }}</span></dd></div>
-            <div><dt>Legacy direction label</dt><dd>{{ camera.direction }}</dd></div>
-            <div><dt>Manufacturer</dt><dd>{{ camera.manufacturer or "Not provided" }}</dd></div>
-            <div><dt>Model</dt><dd>{{ camera.model or "Not provided" }}</dd></div>
-            <div><dt>Serial number</dt><dd class="data-text">{{ camera.serial_number or "Not provided" }}</dd></div>
-            <div><dt>IP address</dt><dd class="data-text">{{ camera.ip_address or "Not configured" }}</dd></div>
-            <div><dt>Enabled</dt><dd>{{ "Yes" if camera.is_enabled else "No" }}</dd></div>
-        </dl>
-    </section>
-
-    <section class="ops-panel camera-detail-panel" aria-labelledby="camera-connection-title">
-        <header class="panel-header"><div><p class="panel-kicker">Native transport</p><h2 id="camera-connection-title">Connection</h2></div></header>
-        <dl class="detail-list">
-            <div><dt>Camera UUID</dt><dd class="data-text">{{ camera.id }}</dd></div>
-            <div><dt>Protocol</dt><dd>{{ camera.protocol }}</dd></div>
-            <div><dt>Vendor serial number</dt><dd class="data-text">{{ camera.serial_number or "Required for native MQTT" }}</dd></div>
-            <div><dt>Provisioning state</dt><dd><span class="status-badge status-badge--{{ camera.provisioning_state|lower|replace('_', '-') }}">{{ camera.provisioning_state }}</span></dd></div>
-            <div><dt>Connection state</dt><dd><span class="status-badge status-badge--{{ camera.connection_state|lower|replace('_', '-') }}">{{ camera.connection_state }}</span></dd></div>
-            <div><dt>MQTT broker</dt><dd><span class="status-badge {% if mqtt_connected %}status-badge--online{% else %}status-badge--offline{% endif %}">{{ "CONNECTED" if mqtt_connected else "DISCONNECTED" }}</span></dd></div>
-            <div><dt>Last seen</dt><dd class="data-text">{{ camera.last_seen_display or "Never" }}</dd></div>
-            <div><dt>Last connected</dt><dd class="data-text">{{ camera.last_connected_display or "Never" }}</dd></div>
-            <div><dt>Development agent version</dt><dd class="data-text">{{ camera.agent_version or "Not reported" }}</dd></div>
-        </dl>
-    </section>
-</div>
-
-{% if can_manage_cameras %}
-<section class="ops-panel">
-    <header class="panel-header"><div><p class="panel-kicker">Business classification</p><h2>Lane Role</h2></div></header>
-    <form class="inline-filter-form" method="post" action="/cameras/{{ camera.id }}/lane-role">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <div class="field-group"><label for="lane-role">Role</label><select id="lane-role" name="lane_role">
-            {% for role in ['ENTRY', 'EXIT', 'UNSPECIFIED'] %}<option value="{{ role }}" {% if camera.lane_role == role %}selected{% endif %}>{{ role|title }}</option>{% endfor %}
-        </select></div>
-        <button class="button-secondary" type="submit">Save lane role</button>
-    </form>
-</section>
-{% endif %}
-
-<section class="ops-panel camera-topics-panel" aria-labelledby="camera-topics-title">
-    <header class="panel-header"><div><p class="panel-kicker">VisionZenith adapter</p><h2 id="camera-topics-title">Native topic namespace</h2></div></header>
-    <div class="topic-grid">
-        <div><span>Heartbeat</span><code>{{ camera.native_keep_alive_topic or "Serial number required" }}</code></div>
-        <div><span>Recognition</span><code>{{ camera.native_recognition_topic or "Serial number required" }}</code></div>
-        <div><span>Development heartbeat</span><code>{{ camera.status_topic }}</code></div>
-    </div>
-    <p class="panel-note">Native messages are mapped by vendor serial number to this camera UUID. The custom ANPR heartbeat remains available for MQTTX regression testing.</p>
-</section>
-
-<section class="ops-panel" aria-labelledby="offline-recovery-title">
-    <header class="panel-header">
-        <div><p class="panel-kicker">Historical event recovery</p><h2 id="offline-recovery-title">Offline Recognition Recovery</h2></div>
-        <span class="status-badge status-badge--{% if offline_recovery.status == 'COMPLETED' %}online{% elif offline_recovery.active %}warning{% elif offline_recovery.status == 'IDLE' %}neutral{% else %}offline{% endif %}">{{ offline_recovery.status|replace('_', ' ') }}</span>
-    </header>
-    <div class="dashboard-mqtt-facts">
-        <div><span>Reported backlog</span><strong>{{ offline_recovery.backlog }}</strong></div>
-        <div><span>Messages received</span><strong>{{ offline_recovery.messages_received }}</strong></div>
-        <div><span>Events added</span><strong>{{ offline_recovery.events_inserted }}</strong></div>
-        <div><span>Duplicates skipped</span><strong>{{ offline_recovery.duplicates_skipped }}</strong></div>
-        <div><span>Invalid skipped</span><strong>{{ offline_recovery.invalid_skipped }}</strong></div>
-    </div>
-    {% if offline_recovery.last_error %}<div class="alert alert--error"><strong>Recovery needs attention.</strong> {{ offline_recovery.last_error }}</div>{% endif %}
-    <p class="panel-note">Recovery starts automatically when the camera reports a non-zero offline backlog. Recovered events retain their original recognition time and never trigger live physical outputs.</p>
+<section class="ops-panel" aria-labelledby="camera-overview-title">
+    <header class="panel-header"><div><p class="panel-kicker">At a glance</p><h2 id="camera-overview-title">Camera Overview</h2></div></header>
+    <dl class="camera-summary-grid">
+        <div><dt>Location</dt><dd>{{ camera.site_code }} &middot; {{ camera.site_name }}</dd></div>
+        <div><dt>Lane role</dt><dd><span class="status-badge status-badge--{{ camera.lane_role|lower }}">{{ camera.lane_role|title }}</span></dd></div>
+        <div><dt>Camera</dt><dd>{{ camera.manufacturer or "Manufacturer not provided" }}{% if camera.model %} &middot; {{ camera.model }}{% endif %}</dd></div>
+        <div><dt>Serial number</dt><dd class="data-text">{{ camera.serial_number or "Not configured" }}</dd></div>
+        <div><dt>{{ "IP address" if camera.ip_address else "Stream host" }}</dt><dd class="data-text">{{ camera.ip_address or stream_host or "Not configured" }}{% if not camera.ip_address and stream_host %}<small>Derived from the configured video stream</small>{% endif %}</dd></div>
+        <div><dt>Last seen</dt><dd class="data-text">{{ camera.last_seen_display or "Never" }}</dd></div>
+    </dl>
     {% if can_manage_cameras %}
-    <form class="panel-actions" method="post" action="/cameras/{{ camera.id }}/offline-recovery">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button class="button-secondary" type="submit" {% if offline_recovery.active or not offline_recovery.can_retry %}disabled{% endif %}>Recover Offline Events</button>
-    </form>
+    <details class="action-drawer camera-inline-settings"><summary>Change lane role</summary><form class="inline-filter-form" method="post" action="/cameras/{{ camera.id }}/lane-role"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div class="field-group"><label for="lane-role">Lane role</label><select id="lane-role" name="lane_role">{% for role in ['ENTRY', 'EXIT', 'UNSPECIFIED'] %}<option value="{{ role }}" {% if camera.lane_role == role %}selected{% endif %}>{{ role|title }}</option>{% endfor %}</select></div><button class="button-secondary" type="submit">Save lane role</button></form></details>
     {% endif %}
 </section>
-
-<section class="ops-panel" aria-labelledby="camera-access-list-title">
-    <header class="panel-header"><div><p class="panel-kicker">Edge synchronization</p><h2 id="camera-access-list-title">Access List</h2></div><span class="status-badge {% if camera.access_list_sync_enabled %}status-badge--active{% else %}status-badge--disabled{% endif %}">{{ "Participating" if camera.access_list_sync_enabled else "Not participating" }}</span></header>
-    <div class="dashboard-mqtt-facts">
-        <div><span>Managed entries</span><strong>{{ access_sync_summary.managed }}</strong></div>
-        <div><span>Verified</span><strong>{{ access_sync_summary.verified }}</strong></div>
-        <div><span>Pending</span><strong>{{ access_sync_summary.pending }}</strong></div>
-        <div><span>Mismatch</span><strong>{{ access_sync_summary.mismatch }}</strong></div>
-        <div><span>Unverified</span><strong>{{ access_sync_summary.unverified }}</strong></div>
-    </div>
-    {% if can_manage_cameras %}
-    <form class="panel-actions" method="post" action="/cameras/{{ camera.id }}/access-list-sync/{{ 'disable' if camera.access_list_sync_enabled else 'enable' }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button class="button-secondary" type="submit">{{ "Stop access-list synchronization" if camera.access_list_sync_enabled else "Enable access-list synchronization" }}</button>
-    </form>
-    {% endif %}
-    {% if can_delete_all_access_list %}
-    <div class="alert alert--error"><strong>Danger: clear this camera’s entire access list.</strong> Central Vehicle and Access List records will remain. Synchronization records will be marked out of sync and will not be automatically repopulated by this action.</div>
-    <form method="post" action="/cameras/{{ camera.id }}/access-list/delete-all" class="staff-user-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <div class="field-group"><label for="delete-all-confirmation">Type DELETE ALL to confirm for {{ camera.code }}</label><input id="delete-all-confirmation" name="confirmation" autocomplete="off" required></div>
-        <div class="panel-actions"><button class="button-secondary" type="submit">Delete All Camera Access Records</button></div>
-    </form>
-    {% endif %}
-</section>
-
-{% if can_view_control_board %}
-<section class="ops-panel">
-    <header class="panel-header"><div><p class="panel-kicker">Peripheral behavior</p><h2>Control Board</h2></div><a class="button-secondary" href="/cameras/{{ camera.id }}/control-board">Configure</a></header>
-    <p class="panel-note">Manage this camera’s RS485 channel, controller address, LED rows, traffic-light behavior, speaker settings, and scheduled presets.</p>
-</section>
-{% endif %}
-
-{% if can_view_barrier %}
-<section class="ops-panel">
-    <header class="panel-header"><div><p class="panel-kicker">Physical access</p><h2>Barrier Control</h2></div><a class="button-secondary" href="/cameras/{{ camera.id }}/barrier">Configure &amp; monitor</a></header>
-    <p class="panel-note">Central barrier ownership, safety commissioning, one-shot OPEN actions, camera acknowledgement, and independent physical feedback.</p>
-</section>
-{% endif %}
 
 {% if can_view_media %}
 <section class="ops-panel" aria-labelledby="camera-recording-title">
-    <header class="panel-header"><div><p class="panel-kicker">ANPR video evidence</p><h2 id="camera-recording-title">Video &amp; Recording</h2></div>{% if media_source %}<span class="status-badge status-badge--{{ 'online' if media_source.recorder_state == 'RECORDING' else 'warning' if media_source.recorder_state in ['STARTING','DEGRADED'] else 'neutral' if media_source.recorder_state == 'DISABLED' else 'offline' }}">{{ media_source.recorder_state }}</span>{% endif %}</header>
-    {% if media_source %}<dl class="detail-list"><div><dt>Provider</dt><dd>{{ media_source.provider_type|replace('_',' ')|title }}</dd></div><div><dt>Recording stream</dt><dd class="data-text">{{ safe_stream_label(media_source.recording_stream_uri) }}</dd></div><div><dt>Storage</dt><dd>{{ media_source.storage.name if media_source.storage else 'Not assigned' }}</dd></div><div><dt>Event window</dt><dd>{{ media_source.pre_event_seconds }} sec before / {{ media_source.post_event_seconds }} sec after</dd></div><div><dt>Detected codec</dt><dd>{{ media_source.detected_codec or 'Not tested' }}</dd></div><div><dt>Resolution</dt><dd>{{ media_source.detected_width ~ ' × ' ~ media_source.detected_height if media_source.detected_width else 'Not detected' }}</dd></div><div><dt>Media time offset</dt><dd>{{ media_source.media_time_offset_ms }} ms</dd></div><div><dt>Last completed segment</dt><dd>{{ media_source.last_successful_segment_at or 'Never' }}</dd></div></dl>{% else %}<div class="empty-state"><strong>Recording is not configured</strong><span>Snapshots remain available. Event video will report Not Configured.</span></div>{% endif %}
-    <div class="panel-actions"><a class="button-secondary" href="/media/cameras/{{ camera.id }}">Open Recording Timeline</a>{% if media_source and media_source.enabled %}<a class="button-secondary" href="/media/cameras/{{ camera.id }}/live">View Live</a>{% endif %}</div>
-    {% if can_manage_media %}<details class="action-drawer"><summary>Configure recording source</summary><form class="staff-user-form" method="post" action="/media/cameras/{{ camera.id }}/configure"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div class="form-grid"><div class="field-group"><label for="media-provider">Provider</label><select id="media-provider" name="provider_type"><option value="NONE" {% if not media_source or media_source.provider_type == 'NONE' %}selected{% endif %}>None</option><option value="CENTRAL_RECORDER" {% if media_source and media_source.provider_type == 'CENTRAL_RECORDER' %}selected{% endif %}>Central Recorder</option><option value="EXTERNAL_NVR" {% if media_source and media_source.provider_type == 'EXTERNAL_NVR' %}selected{% endif %}>External NVR (adapter not commissioned)</option></select></div><div class="field-group"><label for="media-storage">Storage</label><select id="media-storage" name="storage_id"><option value="">Not assigned</option>{% for storage in media_storages %}<option value="{{ storage.id }}" {% if media_source and media_source.storage_id == storage.id %}selected{% endif %}>{{ storage.name }}</option>{% endfor %}</select></div><div class="field-group"><label for="recording-uri">Recording RTSP URI</label><input id="recording-uri" name="recording_stream_uri" value="{{ media_source.recording_stream_uri if media_source else '' }}" placeholder="rtsp://camera.example/stream"></div><div class="field-group"><label for="live-uri">Live-view RTSP URI (optional)</label><input id="live-uri" name="live_stream_uri" value="{{ media_source.live_stream_uri if media_source else '' }}"></div><div class="field-group"><label for="credential-reference">Credential reference</label><input id="credential-reference" name="credential_reference" value="{{ media_source.credential_reference if media_source else '' }}" autocomplete="off"><small>Reference only. Usernames and passwords are stored outside the database.</small></div><div class="field-group"><label for="media-codec">Expected codec</label><select id="media-codec" name="expected_codec"><option value="">Auto-detect</option><option value="h264" {% if media_source and media_source.expected_codec == 'h264' %}selected{% endif %}>H.264</option><option value="h265" {% if media_source and media_source.expected_codec == 'h265' %}selected{% endif %}>H.265</option></select></div><div class="field-group"><label for="pre-event">Pre-event seconds</label><input id="pre-event" type="number" min="0" max="60" name="pre_event_seconds" value="{{ media_source.pre_event_seconds if media_source else 10 }}"></div><div class="field-group"><label for="post-event">Post-event seconds</label><input id="post-event" type="number" min="0" max="120" name="post_event_seconds" value="{{ media_source.post_event_seconds if media_source else 15 }}"></div><div class="field-group"><label for="media-offset">Media time offset (ms)</label><input id="media-offset" type="number" min="-300000" max="300000" name="media_time_offset_ms" value="{{ media_source.media_time_offset_ms if media_source else 0 }}"></div><input type="hidden" name="segment_duration_seconds" value="{{ media_source.segment_duration_seconds if media_source else 60 }}"><label class="checkbox-control"><input type="checkbox" name="enabled" {% if media_source and media_source.enabled %}checked{% endif %}><span>Enable media source</span></label><label class="checkbox-control"><input type="checkbox" name="recording_enabled" {% if media_source and media_source.recording_enabled %}checked{% endif %}><span>Enable continuous recording</span></label></div><div class="panel-actions"><button class="button-primary" type="submit">Save Recording Configuration</button></div></form>{% if media_source %}<form class="panel-actions" method="post" action="/media/cameras/{{ camera.id }}/test"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit">Test Stream</button></form>{% endif %}</details>{% endif %}
+    <header class="panel-header">
+        <div><p class="panel-kicker">ANPR video evidence</p><h2 id="camera-recording-title">Video &amp; Recording</h2></div>
+        {% if media_source %}<span class="status-badge status-badge--{{ 'online' if media_source.recorder_state == 'RECORDING' else 'warning' if media_source.recorder_state in ['STARTING','DEGRADED'] else 'neutral' if media_source.recorder_state == 'DISABLED' else 'offline' }}">{{ media_source.recorder_state|replace('_', ' ') }}</span>{% else %}<span class="status-badge status-badge--neutral">NOT CONFIGURED</span>{% endif %}
+    </header>
+    {% if media_source %}
+    <dl class="camera-summary-grid camera-summary-grid--recording">
+        <div><dt>24/7 recording</dt><dd>{{ "Enabled" if media_source.recording_enabled else "Disabled" }}</dd></div>
+        <div><dt>Recording method</dt><dd>{{ "ANPR Central Recorder" if media_source.provider_type == "CENTRAL_RECORDER" else "Not configured" if media_source.provider_type == "NONE" else "External NVR" }}</dd></div>
+        <div><dt>Video stream</dt><dd class="data-text">{{ safe_stream_label(media_source.recording_stream_uri) }}</dd></div>
+        <div><dt>Authentication</dt><dd>{{ "Configured securely" if media_source.credential_reference else "No authentication required" }}</dd></div>
+        <div><dt>Detected video</dt><dd>{% if media_source.detected_codec %}{{ media_source.detected_codec|upper }}{% if media_source.detected_width and media_source.detected_height %} &middot; {{ media_source.detected_width }} &times; {{ media_source.detected_height }}{% endif %}{% else %}Not tested{% endif %}</dd></div>
+        <div><dt>Storage</dt><dd>{{ media_source.storage.name if media_source.storage else "Not assigned" }}{% if media_storage_health %}<small>{{ media_storage_health.status|title }} &middot; {{ media_storage_health.free_display }} free</small>{% endif %}</dd></div>
+        <div><dt>ANPR event clip</dt><dd>{{ media_source.pre_event_seconds }} sec before &middot; {{ media_source.post_event_seconds }} sec after<small>{{ media_source.pre_event_seconds + media_source.post_event_seconds }} seconds total</small></dd></div>
+        <div><dt>Last completed segment</dt><dd class="data-text">{{ media_source.last_successful_segment_at or "Never" }}</dd></div>
+    </dl>
+    {% else %}
+    <div class="empty-state"><strong>Video is not configured</strong><span>Recognition snapshots remain available. Configure a stream to enable live view and recorded evidence.</span></div>
+    {% endif %}
+    <div class="panel-actions camera-primary-actions">
+        <a class="button-secondary" href="/media/cameras/{{ camera.id }}">Open Recording Timeline</a>
+        {% if media_source and media_source.enabled %}<a class="button-secondary" href="/media/cameras/{{ camera.id }}/live">View Live</a>{% endif %}
+        {% if can_manage_media and media_source %}<form method="post" action="/media/cameras/{{ camera.id }}/test"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit">Test Stream</button></form>{% endif %}
+    </div>
+    {% if can_manage_media %}
+    <details class="action-drawer camera-config-drawer" open>
+        <summary>Configure Video &amp; Recording</summary>
+        <form class="staff-user-form camera-recording-form" method="post" action="/media/cameras/{{ camera.id }}/configure" data-recording-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="provider_type" value="CENTRAL_RECORDER">
+            <div class="recording-switch-row"><div><strong>Enable 24/7 recording</strong><small>Continuously retain camera footage for live review and ANPR evidence.</small></div><label class="checkbox-control"><input type="checkbox" name="recording_enabled" {% if media_source and media_source.recording_enabled %}checked{% endif %}><span>Recording enabled</span></label></div>
+            <div class="form-grid">
+                <div class="field-group field-group--wide"><label for="recording-uri">Camera video stream</label><input id="recording-uri" name="recording_stream_uri" value="{{ (media_source.recording_stream_uri or '') if media_source else '' }}" placeholder="rtsp://192.168.1.50/stream"><small>Enter the camera's RTSP address without embedding a username or password.</small></div>
+                <div class="field-group"><label for="media-storage">Recording storage</label><select id="media-storage" name="storage_id"><option value="">Not assigned</option>{% for storage in media_storages %}<option value="{{ storage.id }}" {% if media_source and media_source.storage_id == storage.id %}selected{% endif %}>{{ storage.name }}</option>{% endfor %}</select></div>
+            </div>
+            <fieldset class="event-clip-settings"><legend>ANPR Event Clip</legend><p>Choose how much recorded context appears around a recognition event.</p><div class="event-clip-fields"><div class="field-group"><label for="pre-event">Before recognition</label><div class="input-suffix"><input id="pre-event" type="number" min="0" max="60" name="pre_event_seconds" value="{{ media_source.pre_event_seconds if media_source else 10 }}"><span>seconds</span></div></div><div class="field-group"><label for="post-event">After recognition</label><div class="input-suffix"><input id="post-event" type="number" min="0" max="120" name="post_event_seconds" value="{{ media_source.post_event_seconds if media_source else 15 }}"><span>seconds</span></div></div><div class="clip-total"><span>Total clip</span><strong data-clip-total>{{ (media_source.pre_event_seconds + media_source.post_event_seconds) if media_source else 25 }} seconds</strong></div></div></fieldset>
+            <details class="nested-settings">
+                <summary>Advanced Stream Settings</summary>
+                <p class="panel-note">Technical overrides are normally left at their defaults.</p>
+                <div class="form-grid">
+                    <div class="field-group"><label for="live-uri">Separate live-view stream (optional)</label><input id="live-uri" name="live_stream_uri" value="{{ (media_source.live_stream_uri or '') if media_source else '' }}" placeholder="Uses recording stream when blank"></div>
+                    <div class="field-group"><label for="credential-reference">Credential reference</label><input id="credential-reference" name="credential_reference" value="{{ (media_source.credential_reference or '') if media_source else '' }}" autocomplete="off"><small>Reference only; credentials remain outside the database.</small></div>
+                    <div class="field-group"><label for="media-codec">Codec override</label><select id="media-codec" name="expected_codec"><option value="" {% if not media_source or not media_source.expected_codec %}selected{% endif %}>Auto-detect (recommended)</option><option value="h264" {% if media_source and media_source.expected_codec == 'h264' %}selected{% endif %}>H.264</option><option value="h265" {% if media_source and media_source.expected_codec == 'h265' %}selected{% endif %}>H.265</option></select></div>
+                    <div class="field-group"><label for="media-offset">Camera clock adjustment</label><div class="input-suffix"><input id="media-offset" type="number" min="-300" max="300" step="0.001" name="media_time_offset_seconds" value="{{ (media_source.media_time_offset_ms / 1000) if media_source else 0 }}"><span>seconds</span></div><small>Use only when video time differs from recognition time.</small></div>
+                    <div class="field-group"><label for="segment-duration">Recording segment length</label><div class="input-suffix"><input id="segment-duration" type="number" min="30" max="300" name="segment_duration_seconds" value="{{ media_source.segment_duration_seconds if media_source else 60 }}"><span>seconds</span></div></div>
+                    <label class="checkbox-control"><input type="checkbox" name="enabled" {% if not media_source or media_source.enabled %}checked{% endif %}><span>Enable this camera's video source</span></label>
+                </div>
+                <input type="hidden" name="media_time_offset_ms" value="{{ media_source.media_time_offset_ms if media_source else 0 }}" data-offset-ms>
+                <div class="commissioning-note"><strong>External NVR adapter</strong><span>Not commissioned. ANPR Central Recorder is the supported recording method.</span></div>
+            </details>
+            <div class="panel-actions"><button class="button-primary" type="submit">Save Video Settings</button></div>
+        </form>
+    </details>
+    {% endif %}
 </section>
 {% endif %}
 
+<section class="ops-panel" aria-labelledby="camera-capabilities-title">
+    <header class="panel-header"><div><p class="panel-kicker">Operational features</p><h2 id="camera-capabilities-title">Camera Functions</h2></div></header>
+    <div class="camera-feature-grid">
+        <article><div><p class="panel-kicker">Edge authorization</p><h3>Access List</h3></div><span class="status-badge {% if camera.access_list_sync_enabled %}status-badge--active{% else %}status-badge--disabled{% endif %}">{{ "Participating" if camera.access_list_sync_enabled else "Not participating" }}</span><p>{{ access_sync_summary.managed }} managed &middot; {{ access_sync_summary.verified }} verified &middot; {{ access_sync_summary.unverified }} unverified</p>{% if can_manage_cameras %}<form method="post" action="/cameras/{{ camera.id }}/access-list-sync/{{ 'disable' if camera.access_list_sync_enabled else 'enable' }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit">{{ "Stop access-list synchronization" if camera.access_list_sync_enabled else "Enable access-list synchronization" }}</button></form>{% endif %}</article>
+        {% if can_view_control_board %}<article><div><p class="panel-kicker">Peripheral behavior</p><h3>Control Board</h3></div><p>LED display, traffic light, speaker, presets, and RS485 communication.</p><a class="button-secondary" href="/cameras/{{ camera.id }}/control-board">Configure</a></article>{% endif %}
+        {% if can_view_barrier %}<article><div><p class="panel-kicker">Physical access</p><h3>Barrier Control</h3></div><p>Central ownership, safety commissioning, open actions, acknowledgement, and feedback.</p><a class="button-secondary" href="/cameras/{{ camera.id }}/barrier">Configure &amp; monitor</a></article>{% endif %}
+    </div>
+    {% if can_delete_all_access_list %}<details class="action-drawer danger-drawer"><summary>Advanced Access-List Actions</summary><div class="alert alert--error"><strong>Delete all access records from this camera only.</strong> Central Vehicle and Access List records remain. Camera synchronization records become out of sync and are not automatically repopulated.</div><form method="post" action="/cameras/{{ camera.id }}/access-list/delete-all" class="staff-user-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div class="field-group"><label for="delete-all-confirmation">Type DELETE ALL to confirm for {{ camera.code }}</label><input id="delete-all-confirmation" name="confirmation" autocomplete="off" required></div><div class="panel-actions"><button class="button-secondary button-secondary--critical" type="submit">Delete All Camera Access Records</button></div></form></details>{% endif %}
+</section>
+
+<section class="ops-panel" aria-labelledby="camera-system-title">
+    <header class="panel-header"><div><p class="panel-kicker">Connectivity</p><h2 id="camera-system-title">System Status</h2></div></header>
+    <dl class="camera-summary-grid"><div><dt>Camera connection</dt><dd><span class="status-badge status-badge--{{ camera.connection_state|lower|replace('_', '-') }}" data-state="{{ camera.connection_state }}">{{ camera.connection_state|replace('_', ' ') }}</span></dd></div><div><dt>Central MQTT broker</dt><dd><span class="status-badge {% if mqtt_connected %}status-badge--online{% else %}status-badge--offline{% endif %}">{{ "Connected" if mqtt_connected else "Disconnected" }}</span></dd></div><div><dt>Last connected</dt><dd class="data-text">{{ camera.last_connected_display or "Never" }}</dd></div><div><dt>Provisioning</dt><dd><span class="status-badge status-badge--{{ camera.provisioning_state|lower|replace('_', '-') }}" data-state="{{ camera.provisioning_state }}">{{ camera.provisioning_state|replace('_', ' ') }}</span></dd></div></dl>
+    <details class="action-drawer"><summary>Technical Details &amp; MQTT Topics</summary><dl class="detail-list compact-detail-list"><div><dt>Camera UUID</dt><dd class="data-text">{{ camera.id }}</dd></div><div><dt>Protocol</dt><dd>{{ camera.protocol }}</dd></div><div><dt>Agent version</dt><dd class="data-text">{{ camera.agent_version or "Not reported" }}</dd></div></dl><div class="topic-grid"><div><span>Heartbeat</span><code>{{ camera.native_keep_alive_topic or "Serial number required" }}</code></div><div><span>Recognition</span><code>{{ camera.native_recognition_topic or "Serial number required" }}</code></div><div><span>Development heartbeat</span><code>{{ camera.status_topic }}</code></div></div><p class="panel-note camera-contained-note">Native messages map the vendor serial number to this camera UUID. The custom ANPR heartbeat remains available for MQTTX regression testing.</p></details>
+    <details class="action-drawer"><summary>What statuses mean</summary><div class="state-reference"><span><strong>UNPROVISIONED</strong> native MQTT not configured</span><span><strong>CONNECTING</strong> awaiting first native heartbeat</span><span><strong>PROVISIONED</strong> first accepted heartbeat confirmed</span><span><strong>ONLINE / OFFLINE</strong> derived only from MQTT heartbeat evidence</span></div></details>
+</section>
+
+<section class="ops-panel" aria-labelledby="offline-recovery-title">
+    <header class="panel-header"><div><p class="panel-kicker">Historical events</p><h2 id="offline-recovery-title">Offline Recognition Recovery</h2></div><span class="status-badge status-badge--{% if offline_recovery.status == 'COMPLETED' %}online{% elif offline_recovery.active %}warning{% elif offline_recovery.status == 'IDLE' %}neutral{% else %}offline{% endif %}">{{ offline_recovery.status|replace('_', ' ') }}</span></header>
+    <div class="compact-operation-row"><div><strong>{% if offline_recovery.backlog %}{{ offline_recovery.backlog }} event{{ '' if offline_recovery.backlog == 1 else 's' }} waiting{% else %}No offline events waiting{% endif %}</strong><span>Recovery runs after a camera reconnects. Recovered events retain their original recognition time and cannot trigger live outputs.</span></div>{% if can_manage_cameras %}<form method="post" action="/cameras/{{ camera.id }}/offline-recovery"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit" {% if offline_recovery.active or not offline_recovery.can_retry %}disabled{% endif %}>Recover Offline Events</button></form>{% endif %}</div>
+    {% if offline_recovery.last_error %}<div class="alert alert--error"><strong>Recovery needs attention.</strong> {{ offline_recovery.last_error }}</div>{% endif %}
+    <details class="action-drawer"><summary>Recovery details</summary><div class="dashboard-mqtt-facts"><div><span>Reported backlog</span><strong>{{ offline_recovery.backlog }}</strong></div><div><span>Messages received</span><strong>{{ offline_recovery.messages_received }}</strong></div><div><span>Events added</span><strong>{{ offline_recovery.events_inserted }}</strong></div><div><span>Duplicates skipped</span><strong>{{ offline_recovery.duplicates_skipped }}</strong></div><div><span>Invalid skipped</span><strong>{{ offline_recovery.invalid_skipped }}</strong></div></div></details>
+</section>
+
 <section class="ops-panel" aria-labelledby="recent-command-title">
-    <header class="panel-header"><div><p class="panel-kicker">Delivery diagnostics</p><h2 id="recent-command-title">Recent commands</h2></div></header>
-    <div class="table-wrap">
-        <table class="data-table">
-            <thead><tr><th>Time</th><th>Command</th><th>Status</th></tr></thead>
-            <tbody>
-                {% for command in recent_commands %}
-                <tr><td class="data-text">{{ command.time }}</td><td>{{ command.command }}</td><td><span class="status-badge status-badge--{{ command.status_class }}">{{ command.status }}</span></td></tr>
-                {% else %}
-                <tr class="empty-row"><td colspan="3">No native MQTT commands recorded.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    <p class="panel-note">Camera acknowledgement confirms request handling only; it does not verify the physical LED, speaker, relay, or display state.</p>
+    <header class="panel-header"><div><p class="panel-kicker">Camera activity</p><h2 id="recent-command-title">Recent Commands</h2></div><span class="status-badge status-badge--neutral">{{ recent_commands|length }} recent</span></header>
+    <div class="compact-operation-row">{% if recent_commands %}<div><strong>{{ recent_commands[0].command }}</strong><span>{{ recent_commands[0].status }} &middot; {{ recent_commands[0].time }}</span></div>{% else %}<div><strong>No commands recorded</strong><span>This camera has no recent native MQTT command activity.</span></div>{% endif %}</div>
+    <details class="action-drawer"><summary>View Command Diagnostics</summary><div class="table-wrap"><table class="data-table"><thead><tr><th>Time</th><th>Command</th><th>Status</th></tr></thead><tbody>{% for command in recent_commands %}<tr><td class="data-text">{{ command.time }}</td><td>{{ command.command }}</td><td><span class="status-badge status-badge--{{ command.status_class }}">{{ command.status }}</span></td></tr>{% else %}<tr class="empty-row"><td colspan="3">No native MQTT commands recorded.</td></tr>{% endfor %}</tbody></table></div><p class="panel-note camera-contained-note">Camera acknowledgement confirms request handling only; it does not verify the physical LED, speaker, relay, or display state.</p></details>
 </section>
 
-<section class="ops-panel camera-actions-panel" aria-labelledby="camera-actions-title">
-    <header class="panel-header"><div><p class="panel-kicker">Administrative controls</p><h2 id="camera-actions-title">Actions</h2></div></header>
-    <div class="camera-actions">
-        {% if can_manage_cameras %}
-            {% if camera.is_enabled and camera.serial_number and camera.provisioning_state != "CREDENTIALS_REVOKED" %}
-            <form method="post" action="/cameras/{{ camera.id }}/commands/test-led"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit">Queue LED test: ANPR</button></form>
-            {% endif %}
-            {% if camera.is_enabled %}
-            <form method="post" action="/cameras/{{ camera.id }}/disable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit">Disable camera</button></form>
-            {% else %}
-            <form method="post" action="/cameras/{{ camera.id }}/enable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit">Enable camera</button></form>
-            {% endif %}
-
-            {% if camera.provisioning_state != "CREDENTIALS_REVOKED" %}
-            <form method="post" action="/cameras/{{ camera.id }}/provisioning/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary button-secondary--critical" type="submit">Revoke provisioning</button></form>
-            {% else %}
-            <form class="camera-reprovision-form" method="post" action="/cameras/{{ camera.id }}/provisioning/restore">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <label for="camera-reprovision-serial">Vendor serial</label>
-                <input id="camera-reprovision-serial" name="serial_number" maxlength="100" value="{{ camera.serial_number or '' }}" placeholder="275688a3-5c6d744b" required>
-                <button class="button-secondary" type="submit">Re-provision camera</button>
-            </form>
-            {% endif %}
-        {% else %}
-        <p class="panel-note">You have read-only access to this camera.</p>
-        {% endif %}
-    </div>
-    <p class="panel-note">No Connect or Reconnect action is provided. The RA5 camera owns its native MQTT connection and automatic reconnection.</p>
-</section>
-
-<div class="state-reference" aria-label="Connection state reference">
-    <span><strong>UNPROVISIONED</strong> native MQTT not configured</span>
-    <span><strong>CONNECTING</strong> awaiting first native heartbeat</span>
-    <span><strong>PROVISIONED</strong> first accepted heartbeat confirmed</span>
-    <span><strong>ONLINE / OFFLINE</strong> derived only from MQTT heartbeat evidence</span>
-</div>
+<section class="ops-panel camera-actions-panel" aria-labelledby="camera-actions-title"><details class="administrative-drawer"><summary><span><span class="panel-kicker">Restricted controls</span><strong id="camera-actions-title">Administrative Actions</strong></span></summary><div class="camera-actions">{% if can_manage_cameras %}{% if camera.is_enabled and camera.serial_number and camera.provisioning_state != "CREDENTIALS_REVOKED" %}<form method="post" action="/cameras/{{ camera.id }}/commands/test-led"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit">Queue LED test: ANPR</button></form>{% endif %}{% if camera.is_enabled %}<form method="post" action="/cameras/{{ camera.id }}/disable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit">Disable camera</button></form>{% else %}<form method="post" action="/cameras/{{ camera.id }}/enable"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary" type="submit">Enable camera</button></form>{% endif %}{% if camera.provisioning_state != "CREDENTIALS_REVOKED" %}<form method="post" action="/cameras/{{ camera.id }}/provisioning/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button-secondary button-secondary--critical" type="submit">Revoke provisioning</button></form>{% else %}<form class="camera-reprovision-form" method="post" action="/cameras/{{ camera.id }}/provisioning/restore"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label for="camera-reprovision-serial">Vendor serial</label><input id="camera-reprovision-serial" name="serial_number" maxlength="100" value="{{ camera.serial_number or '' }}" placeholder="275688a3-5c6d744b" required><button class="button-secondary" type="submit">Re-provision camera</button></form>{% endif %}{% else %}<p class="panel-note">You have read-only access to this camera.</p>{% endif %}</div><p class="panel-note camera-contained-note">No Connect or Reconnect action is provided. The RA5 camera owns its native MQTT connection and automatic reconnection.</p></details></section>
 {% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', path='/js/camera-detail.js') }}" defer></script>{% endblock %}

@@ -139,6 +139,42 @@ def test_dashboard_hides_live_view_without_media_permission(client, db):
     assert "dashboard-live-view.js" not in dashboard.text
 
 
+def test_camera_settings_present_operator_workflow_without_null_values(client, db):
+    create_user(db, ("media.view", "media.manage", "cameras.view"))
+    camera, _ = seed(db)
+    db.add(
+        MediaSource(
+            camera_id=camera.id,
+            provider_type="CENTRAL_RECORDER",
+            enabled=True,
+            recording_enabled=False,
+            recording_stream_uri="rtsp://camera.local/main",
+            live_stream_uri=None,
+            credential_reference=None,
+            pre_event_seconds=10,
+            post_event_seconds=15,
+            recorder_state="DISABLED",
+        )
+    )
+    db.commit()
+    login(client)
+
+    page = client.get(f"/cameras/{camera.id}")
+
+    assert page.status_code == 200
+    assert "Enable 24/7 recording" in page.text
+    assert "ANPR Event Clip" in page.text and "25 seconds total" in page.text
+    assert "No authentication required" in page.text
+    assert "Auto-detect (recommended)" in page.text
+    assert "Advanced Stream Settings" in page.text
+    assert "Technical Details &amp; MQTT Topics" in page.text
+    assert "View Command Diagnostics" in page.text
+    assert "Legacy direction label" not in page.text
+    assert '<option value="EXTERNAL_NVR"' not in page.text
+    assert 'value="None"' not in page.text
+    assert ">None<" not in page.text
+
+
 def test_storage_and_source_configuration_enforce_csrf_and_hide_credentials(client, db, tmp_path):
     create_user(db, ("media.view","media.manage","cameras.view")); camera, _ = seed(db); login(client)
     page = client.get("/media"); token = csrf(page.text)

@@ -28,6 +28,23 @@ def safe_stream_label(uri: str | None) -> str:
     return f"{parts.scheme.upper()} stream at {host}"
 
 
+def safe_stream_host(uri: str | None) -> str | None:
+    """Return only the non-sensitive host portion of a configured stream URI."""
+    if not uri:
+        return None
+    return urlsplit(uri).hostname
+
+
+def humanize_bytes(value: int) -> str:
+    amount = float(max(0, value))
+    for unit in ("B", "KB", "MB", "GB", "TB", "PB"):
+        if amount < 1024 or unit == "PB":
+            precision = 0 if unit == "B" else 1
+            return f"{amount:.{precision}f} {unit}"
+        amount /= 1024
+    return "0 B"
+
+
 def validate_stream_uri(value: str | None) -> str | None:
     uri = str(value or "").strip()
     if not uri: return None

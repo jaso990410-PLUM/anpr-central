@@ -21,7 +21,13 @@ from app.services.dashboard_service import get_dashboard_summary
 from app.services.mqtt_service import mqtt_heartbeat_service
 from app.services.offline_recovery_service import OfflineRecoveryRejected
 from app.services.shell_service import build_navigation, role_label
-from app.services.media_service import MediaConfigurationService, safe_stream_label, storage_health
+from app.services.media_service import (
+    MediaConfigurationService,
+    humanize_bytes,
+    safe_stream_host,
+    safe_stream_label,
+    storage_health,
+)
 from app.web import templates
 
 
@@ -200,6 +206,17 @@ def camera_detail(
     service = CameraService(db)
     camera = _camera_or_404(service, camera_id)
     raw_session_token = request.cookies[settings.session_cookie_name]
+    media_service = MediaConfigurationService(db)
+    media_source = media_service.source_for_camera(camera.id)
+    media_storage_health = None
+    if media_source and media_source.storage:
+        media_storage_health = storage_health(media_source.storage)
+        media_storage_health["free_display"] = humanize_bytes(
+            int(media_storage_health.get("free_bytes", 0))
+        )
+    stream_host = safe_stream_host(
+        media_source.recording_stream_uri if media_source else None
+    )
     context = _shell_context(request, db, user, raw_session_token)
     context.update(
         {
@@ -213,8 +230,10 @@ def camera_detail(
             "can_delete_all_access_list": user_has_permission(user, "access_list.delete_all_camera"),
             "can_view_media": user_has_permission(user, "media.view"),
             "can_manage_media": user_has_permission(user, "media.manage"),
-            "media_source": MediaConfigurationService(db).source_for_camera(camera.id),
-            "media_storages": MediaConfigurationService(db).storages(),
+            "media_source": media_source,
+            "media_storages": media_service.storages(),
+            "media_storage_health": media_storage_health,
+            "stream_host": stream_host,
             "safe_stream_label": safe_stream_label,
             "storage_health": storage_health,
         }
