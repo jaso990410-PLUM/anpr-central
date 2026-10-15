@@ -14,8 +14,11 @@
     const gapNotice = root.querySelector("[data-gap-notice]");
     const players = [...root.querySelectorAll("[data-playback-video]")];
     const zoomSelect = root.querySelector("[data-timeline-zoom]");
+    const zoomWindowLabel = root.querySelector("[data-zoom-window-label]");
     const eventLeadInSelect = root.querySelector("[data-event-lead-in]");
     const zoomDurations = { "24h": dayEnd - dayStart, "6h": 21600000, "1h": 3600000, "15m": 900000 };
+    const minimumViewDuration = 60000;
+    const maximumViewDuration = dayEnd - dayStart;
     let masterTime = Math.min(dayEnd - 1, Math.max(dayStart, Date.parse(data.playhead)));
     let selectedEvent = data.event;
     let playing = false;
@@ -27,6 +30,10 @@
     let eventCueAt = null;
     let eventCueShown = false;
     let eventPrerollMs = Number(data.eventPrerollSeconds || 10) * 1000;
+    let customZoom = data.windowMinutes !== null && data.windowMinutes !== undefined;
+    let viewDuration = customZoom
+        ? Math.min(maximumViewDuration, Math.max(minimumViewDuration, Number(data.windowMinutes) * 60000))
+        : (zoomDurations[data.zoom] || zoomDurations["24h"]);
 
     const cameraData = new Map(data.cameras.map((camera) => [camera.id, camera]));
     const formatDateTime = (epoch) => new Intl.DateTimeFormat("en-GB", {
@@ -41,14 +48,25 @@
     const rangesFor = (cameraId) => (cameraData.get(cameraId)?.coverage || []).map((range) => ({ start: Date.parse(range.start), end: Date.parse(range.end) }));
     const containingRange = (cameraId, epoch) => rangesFor(cameraId).find((range) => epoch >= range.start && epoch < range.end);
 
+    function formatWindow(duration) {
+        const minutes = Math.max(1, Math.round(duration / 60000));
+        if (minutes < 60) return `${minutes} min window`;
+        const hours = minutes / 60;
+        return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} hr window`;
+    }
+
+    function syncZoomControls() {
+        if (zoomWindowLabel) zoomWindowLabel.textContent = `${formatWindow(viewDuration)} · wheel to zoom`;
+        if (customZoom && zoomSelect) zoomSelect.value = "";
+    }
+
     function setView() {
-        const duration = zoomDurations[zoomSelect?.value || data.zoom] || zoomDurations["24h"];
-        if (duration >= dayEnd - dayStart) {
+        if (viewDuration >= maximumViewDuration) {
             viewStart = dayStart;
             viewEnd = dayEnd;
         } else {
-            viewStart = clamp(masterTime - duration / 2, dayStart, dayEnd - duration);
-            viewEnd = viewStart + duration;
+            viewStart = clamp(masterTime - viewDuration / 2, dayStart, dayEnd - viewDuration);
+            viewEnd = viewStart + viewDuration;
         }
     }
 
@@ -69,8 +87,9 @@
         }
     }
 
-    function renderTimeline() {
-        setView();
+    function renderTimeline(recenter = true) {
+        if (recenter) setView();
+        syncZoomControls();
         renderScale();
         root.querySelectorAll("[data-coverage-row]").forEach((row) => {
             const cameraId = row.dataset.coverageRow;
@@ -123,6 +142,8 @@
         url.searchParams.set("time", iso(masterTime));
         url.searchParams.set("zoom", zoomSelect?.value || "24h");
         url.searchParams.set("lead_in", String(eventPrerollMs / 1000));
+        if (customZoom) url.searchParams.set("window_minutes", String(Math.max(1, Math.round(viewDuration / 60000))));
+        else url.searchParams.delete("window_minutes");
         url.searchParams.delete("start");
         url.searchParams.delete("end");
         if (selectedEvent) url.searchParams.set("event", selectedEvent); else url.searchParams.delete("event");
@@ -292,8 +313,30 @@
         event.preventDefault();
         seek(masterTime + (event.key === "ArrowRight" ? 10000 : -10000), false);
     });
+    timeline?.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        const track = timeline.querySelector(".timeline-track");
+        if (!track) return;
+        const rect = track.getBoundingClientRect();
+        const ratio = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+        const anchor = viewStart + ratio * (viewEnd - viewStart);
+        const nextDuration = clamp(viewDuration * Math.exp(event.deltaY * 0.0015), minimumViewDuration, maximumViewDuration);
+        if (Math.abs(nextDuration - viewDuration) < 100) return;
+        viewDuration = nextDuration;
+        customZoom = true;
+        viewStart = clamp(anchor - ratio * viewDuration, dayStart, dayEnd - viewDuration);
+        viewEnd = viewStart + viewDuration;
+        renderTimeline(false);
+        updateUrl();
+    }, { passive: false });
 
-    zoomSelect?.addEventListener("change", () => { renderTimeline(); updateUrl(); });
+    zoomSelect?.addEventListener("change", (event) => {
+        if (!zoomDurations[event.target.value]) return;
+        viewDuration = zoomDurations[event.target.value];
+        customZoom = false;
+        renderTimeline();
+        updateUrl();
+    });
     eventLeadInSelect?.addEventListener("change", (event) => {
         eventPrerollMs = Number(event.target.value) * 1000;
         updateUrl();

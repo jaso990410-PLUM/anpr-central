@@ -1,6 +1,6 @@
 {% extends "base_app.html" %}
 {% block title %}Playback Workspace &middot; ANPR Central{% endblock %}
-{% block styles %}<link rel="stylesheet" href="{{ url_for('static', path='/css/media-playback.css') }}?v=20261015.1">{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', path='/css/media-playback.css') }}?v=20261015.2">{% endblock %}
 {% block content %}
 <header class="page-header playback-header">
     <div><p class="eyebrow">ANPR video investigation</p><h1>Playback Workspace</h1><p>{{ selected_site.code }} &middot; synchronized recording and recognition evidence</p></div>
@@ -45,7 +45,7 @@
         </section>
 
         <section class="ops-panel playback-timeline-panel" aria-labelledby="timeline-title">
-            <header class="panel-header"><div><p class="panel-kicker">Recording coverage and ANPR activity</p><h2 id="timeline-title">Timeline</h2></div><div class="timeline-zoom"><label for="timeline-zoom">Zoom</label><select id="timeline-zoom" data-timeline-zoom>{% for value,label in (('24h','24 hours'),('6h','6 hours'),('1h','1 hour'),('15m','15 minutes')) %}<option value="{{ value }}" {% if zoom == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div></header>
+            <header class="panel-header"><div><p class="panel-kicker">Recording coverage and ANPR activity</p><h2 id="timeline-title">Timeline</h2></div><div class="timeline-zoom"><label for="timeline-zoom">Zoom</label><select id="timeline-zoom" data-timeline-zoom><option value="" disabled {% if workspace_data.windowMinutes is not none %}selected{% endif %}>Custom</option>{% for value,label in (('24h','24 hours'),('6h','6 hours'),('1h','1 hour'),('15m','15 minutes')) %}<option value="{{ value }}" {% if workspace_data.windowMinutes is none and zoom == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><output data-zoom-window-label></output></div></header>
             <div class="timeline-scroll">
                 <div class="timeline-scale" data-timeline-scale></div>
                 <div class="timeline-interactive" data-timeline tabindex="0" aria-label="Recording timeline. Click or use arrow keys to choose a playback time.">
@@ -73,4 +73,4 @@
 </div>
 <script type="application/json" id="playback-workspace-data">{{ workspace_data|tojson }}</script>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', path='/js/media-playback.js') }}?v=20261015.4" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='/js/media-playback.js') }}?v=20261015.5" defer></script>{% endblock %}

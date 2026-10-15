@@ -190,6 +190,13 @@
     font-size: 0.62rem;
 }
 
+.timeline-zoom output {
+    min-width: 8.8rem;
+    color: var(--text-secondary);
+    font: 0.61rem var(--technical);
+    text-align: right;
+}
+
 .layout-controls .is-active {
     color: var(--accent-secondary);
     background: rgba(47, 168, 255, 0.12);
