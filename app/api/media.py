@@ -104,8 +104,12 @@ def _bounded_video_stream(db:Session,camera_id:UUID,start_at:datetime,end_at:dat
         manifest=playback_dir/f"session_{uuid4().hex}.txt"
         manifest.write_text("".join(f"file '{str(path).replace(chr(39), chr(39)*2)}'\n" for path in inputs),encoding="utf-8")
         input_args=["-ss",str(offset),"-f","concat","-safe","0","-i",str(manifest)]
-    codecs={str(segment.codec or source.detected_codec or source.expected_codec or "").lower() for segment in availability.segments}
-    video_args=["-c:v","copy"] if codecs <= {"h264","avc1",""} else ["-c:v","libx264","-preset","veryfast"]
+    # Historical playback must start at the requested frame, not at an earlier
+    # source keyframe. Stream-copy seeking can add a variable GOP-sized lead-in
+    # (often several seconds), making recognition markers appear inconsistent.
+    # Decode and encode the bounded response so every event starts at the same
+    # precise pre-roll offset.
+    video_args=["-c:v","libx264","-preset","veryfast","-tune","zerolatency","-pix_fmt","yuv420p"]
     command=[executable,"-hide_banner","-loglevel","error",*input_args,"-t",str(duration),"-map","0:v:0","-an",*video_args,
         "-movflags","frag_keyframe+empty_moov+default_base_moof","-f","mp4","pipe:1"]
     try: process=subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)

@@ -4,6 +4,7 @@ import re
 import json
 from collections.abc import Generator
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
 
 import pytest
 from fastapi.testclient import TestClient
@@ -253,6 +254,45 @@ def test_playback_workspace_renders_calendar_gaps_markers_and_local_time(client,
     assert payload["markers"][0]["local_time"] == "00:25:00"
     assert payload["markers"][0]["at"] == "2026-10-14T16:25:01.500000Z"
     assert payload["playhead"] == "2026-10-14T16:24:59.500000Z"
+    assert "media-playback.js?v=20261015.3" in page.text
+
+
+def test_historical_stream_reencodes_for_frame_accurate_event_preroll(client, db, tmp_path, monkeypatch):
+    create_user(db, ("media.view",))
+    camera, _ = seed(db)
+    storage = MediaStorage(name="Primary", storage_type="LOCAL", root_path=str(tmp_path), enabled=True)
+    db.add(storage); db.flush()
+    source = MediaSource(camera_id=camera.id, provider_type="CENTRAL_RECORDER", enabled=True,
+        recording_enabled=True, recording_stream_uri="rtsp://camera.local/main", storage_id=storage.id,
+        recorder_state="RECORDING", detected_codec="h264")
+    db.add(source); db.flush()
+    segment_path = tmp_path / "segment.mp4"
+    segment_path.write_bytes(b"recording")
+    db.add(RecordingSegment(media_source_id=source.id, camera_id=camera.id,
+        started_at=datetime(2026, 10, 14, 16, 20, tzinfo=timezone.utc),
+        ended_at=datetime(2026, 10, 14, 16, 30, tzinfo=timezone.utc),
+        relative_path=segment_path.name, state="COMPLETE", codec="h264"))
+    db.commit(); login(client)
+    commands = []
+
+    class FakeProcess:
+        def __init__(self): self.stdout = BytesIO(b"video")
+        def poll(self): return 0
+        def wait(self, timeout=None): return 0
+        def terminate(self): return None
+        def kill(self): return None
+
+    monkeypatch.setattr("app.api.media.shutil.which", lambda _name: "ffmpeg")
+    monkeypatch.setattr("app.api.media.subprocess.Popen", lambda command, **_kwargs: commands.append(command) or FakeProcess())
+
+    response = client.get(f"/media/cameras/{camera.id}/playback", params={
+        "start":"2026-10-14T16:24:58Z", "end":"2026-10-14T16:25:20Z",
+    })
+
+    assert response.status_code == 200 and response.content == b"video"
+    assert "libx264" in commands[0]
+    assert "copy" not in commands[0]
+    assert "zerolatency" in commands[0]
 
 
 def test_playback_workspace_supports_multiple_cameras_and_truthful_empty_coverage(client, db):

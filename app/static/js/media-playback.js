@@ -22,6 +22,10 @@
     let dragging = false;
     let viewStart = dayStart;
     let viewEnd = dayEnd;
+    let loadGeneration = 0;
+    let eventCueAt = null;
+    let eventCueShown = false;
+    const EVENT_PREROLL_MS = 2000;
 
     const cameraData = new Map(data.cameras.map((camera) => [camera.id, camera]));
     const formatDateTime = (epoch) => new Intl.DateTimeFormat("en-GB", {
@@ -133,10 +137,51 @@
         if (gapNotice) gapNotice.hidden = true;
     }
 
-    function loadPlayers(epoch, autoplay = false) {
+    function loadPlayers(epoch, autoplay = false, cueAt = null) {
+        const generation = ++loadGeneration;
         masterTime = clamp(epoch, dayStart, dayEnd - 1);
+        eventCueAt = Number.isFinite(cueAt) ? cueAt : null;
+        eventCueShown = false;
         clearGap();
         const advancedEnd = data.advancedEnd ? Date.parse(data.advancedEnd) : null;
+        const readyPlayers = new Set();
+        const settledPlayers = new Set();
+        const availablePlayers = [];
+        let preparationConfigured = false;
+        const toggle = root.querySelector("[data-play-toggle]");
+        playing = false;
+        if (toggle) {
+            toggle.textContent = autoplay ? "Preparing…" : "Play";
+            toggle.disabled = true;
+        }
+
+        function finishPreparation() {
+            if (!preparationConfigured || generation !== loadGeneration || settledPlayers.size !== availablePlayers.length) return;
+            if (toggle) toggle.disabled = false;
+            if (!readyPlayers.size) {
+                playing = false;
+                if (toggle) toggle.textContent = "Play";
+                showGap("The selected recording could not be prepared.");
+                return;
+            }
+            readyPlayers.forEach((video) => {
+                const stage = video.closest("[data-player-stage]");
+                stage.querySelector("[data-player-message]").hidden = true;
+                stage.querySelector("[data-player-state]").textContent = "Recorded";
+            });
+            if (!autoplay) {
+                if (toggle) toggle.textContent = "Play";
+                return;
+            }
+            playing = true;
+            if (toggle) toggle.textContent = "Pause";
+            if (eventCueAt !== null) {
+                const seconds = Math.max(0, Math.round((eventCueAt - masterTime) / 1000));
+                showGap(`Event ready · recognition moment in ${seconds} second${seconds === 1 ? "" : "s"}`);
+            }
+            readyPlayers.forEach((video) => video.play().catch(() => {}));
+        }
+
         players.forEach((video) => {
             const cameraId = video.dataset.cameraId;
             const stage = video.closest("[data-player-stage]");
@@ -152,26 +197,45 @@
                 state.textContent = "No footage";
                 return;
             }
+            availablePlayers.push(video);
             const clipStart = masterTime;
             const clipEnd = Math.min(range.end, advancedEnd || Infinity, clipStart + 15 * 60 * 1000);
+            delete video.dataset.mediaOrigin;
             video.dataset.windowStart = String(clipStart);
             video.dataset.windowEnd = String(clipEnd);
-            video.src = `/media/cameras/${encodeURIComponent(cameraId)}/playback?start=${encodeURIComponent(iso(clipStart))}&end=${encodeURIComponent(iso(clipEnd))}`;
             video.playbackRate = Number(root.querySelector("[data-playback-speed]")?.value || 1);
-            message.textContent = "Preparing recording…";
+            message.textContent = eventCueAt === null ? "Preparing recording…" : "Preparing event footage…";
             message.hidden = false;
             state.textContent = "Preparing";
-            video.load();
             video.addEventListener("loadedmetadata", () => {
+                if (generation !== loadGeneration) return;
                 video.dataset.mediaOrigin = String(video.seekable.length ? video.seekable.start(0) : video.currentTime);
-                message.hidden = true;
-                state.textContent = "Recorded";
-                if (autoplay) video.play().catch(() => {});
             }, { once: true });
+            video.addEventListener("canplay", () => {
+                if (generation !== loadGeneration) return;
+                if (!video.dataset.mediaOrigin) {
+                    video.dataset.mediaOrigin = String(video.seekable.length ? video.seekable.start(0) : video.currentTime);
+                }
+                readyPlayers.add(video);
+                settledPlayers.add(video);
+                finishPreparation();
+            }, { once: true });
+            video.addEventListener("error", () => {
+                if (generation !== loadGeneration) return;
+                message.textContent = "Recording could not be prepared";
+                message.hidden = false;
+                state.textContent = "Unavailable";
+                settledPlayers.add(video);
+                finishPreparation();
+            }, { once: true });
+            video.src = `/media/cameras/${encodeURIComponent(cameraId)}/playback?start=${encodeURIComponent(iso(clipStart))}&end=${encodeURIComponent(iso(clipEnd))}`;
+            video.load();
         });
-        playing = autoplay;
-        const toggle = root.querySelector("[data-play-toggle]");
-        if (toggle) toggle.textContent = playing ? "Pause" : "Play";
+        preparationConfigured = true;
+        if (eventCueAt !== null) {
+            showGap("Preparing event footage · playback will start two seconds before recognition");
+        }
+        if (!availablePlayers.length) finishPreparation();
         renderTimeline();
         updateUrl();
     }
@@ -186,7 +250,8 @@
     function selectMarker(marker) {
         selectedEvent = marker.id;
         root.querySelectorAll(".playback-event-row").forEach((row) => row.classList.toggle("is-selected", row.dataset.eventId === marker.id));
-        seek(Date.parse(marker.at) - 2000, true);
+        const recognitionAt = Date.parse(marker.at);
+        loadPlayers(recognitionAt - EVENT_PREROLL_MS, true, recognitionAt);
     }
 
     function eventRelative(direction) {
@@ -230,6 +295,7 @@
     root.querySelector("[data-previous-event]")?.addEventListener("click", () => eventRelative(-1));
     root.querySelector("[data-next-event]")?.addEventListener("click", () => eventRelative(1));
     root.querySelector("[data-play-toggle]")?.addEventListener("click", () => {
+        if (root.querySelector("[data-play-toggle]").disabled) return;
         playing = !playing;
         players.forEach((video) => playing ? video.play().catch(() => {}) : video.pause());
         root.querySelector("[data-play-toggle]").textContent = playing ? "Pause" : "Play";
@@ -250,6 +316,15 @@
                 if (Number.isFinite(target) && Math.abs(peer.currentTime - target) > 1.5 && target >= 0 && target <= peer.duration) peer.currentTime = target;
             });
             updatePlayhead();
+            if (eventCueAt !== null && !eventCueShown && masterTime >= eventCueAt) {
+                eventCueShown = true;
+                const marker = data.markers.find((item) => item.id === selectedEvent);
+                showGap(`Recognition moment${marker?.plate ? ` · ${marker.plate}` : ""}`);
+                const cueGeneration = loadGeneration;
+                window.setTimeout(() => {
+                    if (cueGeneration === loadGeneration && eventCueShown) clearGap();
+                }, 2500);
+            }
             syncing = false;
         });
         video.addEventListener("ended", () => {
