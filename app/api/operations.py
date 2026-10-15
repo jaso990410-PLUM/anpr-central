@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import urlencode
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BeforeValidator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -17,16 +17,19 @@ from app.db.dependencies import get_db
 from app.dependencies.auth import require_page_permission, require_permission, user_has_permission
 from app.dependencies.csrf import require_session_csrf
 from app.models.parking import ParkingReviewItem, ParkingSessionIssue
+from app.models.barrier import BarrierState
 from app.models.recognition_event import RecognitionEvent
 from app.models.user import User
 from app.services.audit_service import create_audit_log
 from app.services.barrier_action_service import BarrierActionError
 from app.services.dashboard_service import get_dashboard_summary
+from app.services.media_service import MediaPlaybackService, MediaValidationError
 from app.services.mqtt_service import mqtt_heartbeat_service
 from app.services.operations_service import OperationsService
 from app.services.parking_reconciliation_service import ParkingReconciliationService, ReconciliationConflict, ReconciliationError
 from app.services.parking_review_service import ParkingReviewService
 from app.services.plate_correction_service import PlateCorrectionError, PlateCorrectionService
+from app.services.recognition_media_service import RecognitionMediaError, RecognitionMediaService
 from app.services.shell_service import build_navigation, role_label
 from app.services.visitor_reservation_service import VisitorReservationService
 from app.web import templates
@@ -81,6 +84,7 @@ def _render_operations(
     date_to: date | None = None,
     error: str = "",
     status_code: int = 200,
+    force_historical: bool = False,
 ) -> HTMLResponse:
     service = OperationsService(db)
     recent = service.recent(site_id=site_id, camera_id=camera_id, lane_role=lane_role, decision=decision, exceptions_only=exceptions_only, query_text=query_text, date_from=date_from, date_to=date_to, limit=15)
@@ -99,7 +103,7 @@ def _render_operations(
         "similar": tuple(item for item in service.similar_plates(selected["effective_plate"], site_id=selected["event"].site_id) if item.plate != selected["effective_plate"]) if selected else (),
         "previous_visits": service.previous_visits(selected["event"], limit=5) if selected else (),
         "previous_visit_count": service.previous_visit_count(selected["event"]) if selected else 0,
-        "live_mode": bool(selected and recent and selected["event"].id == recent[0]["id"]),
+        "live_mode": bool(not force_historical and selected and recent and selected["event"].id == recent[0]["id"]),
         "filters": {"site": str(site_id) if site_id else "", "camera": str(camera_id) if camera_id else "", "lane_role": lane_role, "decision": decision, "exceptions_only": exceptions_only, "q": query_text, "date_from": date_from.isoformat() if date_from else "", "date_to": date_to.isoformat() if date_to else ""},
         "error": error,
         "action_token": uuid4().hex,
@@ -110,6 +114,64 @@ def _render_operations(
         ) if selected and not selected.get("visitor") else (),
     })
     return templates.TemplateResponse(request=request, name="operations/console.html", context=context, status_code=status_code)
+
+
+def _selected_lane(service: OperationsService, site_id: UUID | None, camera_id: UUID | None):
+    sites = service.sites()
+    site = next((item for item in sites if item.id == site_id), None) if site_id else next(
+        (item for item in sites if service.cameras(item.id)), sites[0] if sites else None
+    )
+    if site_id and site is None:
+        raise HTTPException(404, "Site not found")
+    cameras = service.cameras(site.id) if site else ()
+    camera = next((item for item in cameras if item.id == camera_id), None) if camera_id else (cameras[0] if cameras else None)
+    if camera_id and camera is None:
+        raise HTTPException(404, "Lane camera not found at the selected site")
+    return sites, site, cameras, camera
+
+
+def _console_payload(db: Session, service: OperationsService, site, camera, *, can_view_media: bool) -> dict[str, object]:
+    if site is None:
+        return {"statistics": {"entries": 0, "exits": 0, "on_site": 0}, "latest": None, "recent": [], "barrier_state": "UNKNOWN"}
+    statistics = service.today_statistics(site)
+    if camera is None:
+        return {"statistics": statistics, "latest": None, "recent": [], "barrier_state": "UNKNOWN"}
+    latest_event = service.latest_live_event(site_id=site.id, camera_id=camera.id)
+    latest = service.console_latest(latest_event)
+    if latest and not can_view_media:
+        latest["event_video_url"] = None
+        latest["recording_url"] = None
+    recent = service.recent(site_id=site.id, camera_id=camera.id, limit=12)
+    barrier_state = db.scalar(select(BarrierState).where(BarrierState.camera_id == camera.id))
+    return {
+        "statistics": statistics,
+        "latest": latest,
+        "recent": [{**item, "id": str(item["id"])} for item in recent],
+        "barrier_state": barrier_state.normalized_state if barrier_state else "UNKNOWN",
+    }
+
+
+def _render_live_console(request: Request, db: Session, user: User, *, site_id: UUID | None, camera_id: UUID | None) -> HTMLResponse:
+    service = OperationsService(db)
+    sites, site, cameras, camera = _selected_lane(service, site_id, camera_id)
+    can_view_media = user_has_permission(user, "media.view")
+    live_available = False
+    if camera and can_view_media:
+        try:
+            MediaPlaybackService(db).live_source(camera.id)
+            live_available = True
+        except MediaValidationError:
+            pass
+    context = _context(request, db, user)
+    context.update({
+        "sites": sites,
+        "selected_site": site,
+        "cameras": cameras,
+        "selected_camera": camera,
+        "live_available": live_available,
+        "console": _console_payload(db, service, site, camera, can_view_media=can_view_media),
+    })
+    return templates.TemplateResponse(request=request, name="operations/live_console.html", context=context)
 
 
 @router.get("/operations", response_class=HTMLResponse)
@@ -128,14 +190,58 @@ def operations_console(
     user: User = Depends(require_page_permission("operations.view")),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    history_requested = bool(event or lane_role or decision or exceptions_only or q or date_from or date_to)
     if date_from and date_to and date_from > date_to:
         return _render_operations(request, db, user, selected_event_id=event, site_id=site, camera_id=camera, lane_role=lane_role.upper(), decision=decision.upper(), exceptions_only=exceptions_only, query_text=q, date_from=date_from, date_to=date_to, error="From date must not be later than To date.", status_code=400)
+    if not history_requested:
+        return _render_live_console(request, db, user, site_id=site, camera_id=camera)
     return _render_operations(request, db, user, selected_event_id=event, site_id=site, camera_id=camera, lane_role=lane_role.upper(), decision=decision.upper(), exceptions_only=exceptions_only, query_text=q, date_from=date_from, date_to=date_to, error=error)
+
+
+@router.get("/operations/history", response_class=HTMLResponse)
+def operations_history(
+    request: Request,
+    event: OptionalUUID = None,
+    site: OptionalUUID = None,
+    camera: OptionalUUID = None,
+    lane_role: Annotated[str, Query(max_length=20)] = "",
+    decision: Annotated[str, Query(max_length=20)] = "",
+    exceptions_only: bool = False,
+    q: Annotated[str, Query(max_length=120)] = "",
+    date_from: OptionalDate = None,
+    date_to: OptionalDate = None,
+    user: User = Depends(require_page_permission("operations.view")),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    if date_from and date_to and date_from > date_to:
+        return _render_operations(request, db, user, selected_event_id=event, site_id=site, camera_id=camera, lane_role=lane_role.upper(), decision=decision.upper(), exceptions_only=exceptions_only, query_text=q, date_from=date_from, date_to=date_to, error="From date must not be later than To date.", status_code=400, force_historical=True)
+    return _render_operations(request, db, user, selected_event_id=event, site_id=site, camera_id=camera, lane_role=lane_role.upper(), decision=decision.upper(), exceptions_only=exceptions_only, query_text=q, date_from=date_from, date_to=date_to, force_historical=True)
 
 
 @router.get("/operations/events/{event_id}", response_class=HTMLResponse)
 def operations_event(event_id: UUID, request: Request, user: User = Depends(require_page_permission("operations.view")), db: Session = Depends(get_db)) -> HTMLResponse:
     return _render_operations(request, db, user, selected_event_id=event_id)
+
+
+@router.get("/operations/events/{event_id}/image/{kind}")
+def operations_image(
+    event_id: UUID,
+    kind: Literal["scene", "plate"],
+    _user: User = Depends(require_permission("operations.view")),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    event = db.get(RecognitionEvent, event_id)
+    if event is None:
+        raise HTTPException(404, "Recognition event not found")
+    reference = event.scene_image_path if kind == "scene" else event.plate_image_path
+    if not reference:
+        raise HTTPException(404, "Recognition image not found")
+    try:
+        path = RecognitionMediaService().resolve(reference)
+    except RecognitionMediaError as error:
+        raise HTTPException(404, "Recognition image not found") from error
+    media_type = {".jpg": "image/jpeg", ".png": "image/png", ".bmp": "image/bmp"}.get(path.suffix.lower(), "application/octet-stream")
+    return FileResponse(path, media_type=media_type)
 
 
 @router.post("/operations/events/{event_id}/correct")
@@ -299,6 +405,24 @@ def operations_recent(
 ) -> dict[str, object]:
     items = OperationsService(db).recent(site_id=site, camera_id=camera, lane_role=lane_role.upper(), decision=decision.upper(), exceptions_only=exceptions_only, query_text=q, date_from=date_from, date_to=date_to, limit=15)
     return {"events": [{**item, "id": str(item["id"])} for item in items]}
+
+
+@router.get("/api/operations/console")
+def operations_console_updates(
+    site: UUID,
+    camera: UUID,
+    user: User = Depends(require_permission("operations.view")),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    service = OperationsService(db)
+    _sites, selected_site, _cameras, selected_camera = _selected_lane(service, site, camera)
+    return _console_payload(
+        db,
+        service,
+        selected_site,
+        selected_camera,
+        can_view_media=user_has_permission(user, "media.view"),
+    )
 
 
 def _error_redirect(event_id: UUID, message: str) -> RedirectResponse:

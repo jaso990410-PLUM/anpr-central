@@ -1,7 +1,8 @@
 import re
 from collections.abc import Generator
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +15,7 @@ from app.main import app
 from app.models.audit_log import AuditLog
 from app.models.barrier import BarrierAction
 from app.models.camera import Camera
+from app.models.media import MediaSource
 from app.models.operations import ParkingReconciliation, RecognitionPlateCorrection, VehicleWatch
 from app.models.parking import AccessDecision, ParkingSession, ParkingSessionIssue
 from app.models.permission import Permission
@@ -89,6 +91,93 @@ def test_operations_console_permission_filters_and_missing_images(client: TestCl
     recent = client.get("/api/operations/recent")
     assert recent.status_code == 200
     assert recent.json()["events"][0]["updated_at"] == recognized.updated_at.replace(tzinfo=timezone.utc).isoformat()
+
+
+def test_persistent_lane_console_selects_lane_and_keeps_live_stream_private(client: TestClient, db: Session) -> None:
+    create_user(db, ("operations.view", "media.view")); site, entry, _ = seed(db)
+    recognized = event(db, entry, "LIVE123", at=datetime.now(timezone.utc), source="LIVE")
+    db.add(MediaSource(camera_id=entry.id, provider_type="CENTRAL_RECORDER", enabled=True,
+        recording_enabled=True, recording_stream_uri="rtsp://secret:password@camera.local/main",
+        live_stream_uri="rtsp://secret:password@camera.local/live", recorder_state="RECORDING"))
+    db.commit(); login(client)
+
+    page = client.get("/operations", params={"site":str(site.id), "camera":str(entry.id)})
+
+    assert page.status_code == 200
+    assert "Persistent guard workspace" in page.text and "Recent Access Records" in page.text
+    assert f'data-camera-id="{entry.id}"' in page.text
+    assert f'/media/cameras/{entry.id}/live-stream' in page.text
+    assert "rtsp://" not in page.text and "secret:password" not in page.text
+    assert 'autoplay muted playsinline' in page.text
+    assert "Search Records / History" in page.text
+    assert f'/media/events/{recognized.id}' in page.text
+    assert "Open Barrier" not in page.text
+    assert "operations-live.js" in page.text
+
+    history = client.get("/operations/history", params={"site":str(site.id), "camera":str(entry.id)})
+    assert history.status_code == 200
+    assert "HISTORICAL EVENT" in history.text
+    assert 'action="/operations/history"' in history.text
+
+
+def test_persistent_console_counts_sessions_and_never_promotes_recovered_event(client: TestClient, db: Session) -> None:
+    create_user(db, ("operations.view", "barrier.operate")); site, entry, exit_camera = seed(db)
+    site_zone = ZoneInfo("Asia/Kuala_Lumpur")
+    local_today = datetime.now(site_zone).date()
+    now = datetime.combine(local_today, time(hour=12), site_zone).astimezone(timezone.utc)
+    local_boundary_entry = datetime.combine(local_today, time(minute=30), site_zone).astimezone(timezone.utc)
+    latest_live = event(db, entry, "RAWI23", at=now - timedelta(minutes=2), source="LIVE")
+    recovered = event(db, entry, "RECOVER9", at=now - timedelta(minutes=1), source="OFFLINE_RECOVERY")
+    exit_event = event(db, exit_camera, "EXIT123", at=now - timedelta(minutes=3), source="LIVE")
+    first_vehicle = Vehicle(plate_text="RAW123")
+    second_vehicle = Vehicle(plate_text="EXIT123")
+    db.add_all((first_vehicle, second_vehicle)); db.flush()
+    db.add(RecognitionPlateCorrection(recognition_event_id=latest_live.id, corrected_plate="RAW123",
+        corrected_plate_normalized="RAW123", reason="OCR correction"))
+    db.add_all((
+        ParkingSession(site_id=site.id, vehicle_id=first_vehicle.id, entry_recognition_id=latest_live.id,
+            status="OPEN", entered_at=latest_live.captured_at, source="LIVE"),
+        ParkingSession(site_id=site.id, vehicle_id=second_vehicle.id, entry_recognition_id=exit_event.id,
+            exit_recognition_id=exit_event.id, status="CLOSED", entered_at=local_boundary_entry,
+            exited_at=now - timedelta(minutes=3), source="LIVE"),
+    ))
+    denied = event(db, entry, "DENY123", at=now - timedelta(minutes=5))
+    reviewed = event(db, entry, "REVIEW1", at=now - timedelta(minutes=6))
+    db.add_all((
+        AccessDecision(recognition_event_id=denied.id, site_id=site.id, camera_id=entry.id,
+            access_status="NOT_LISTED", decision="DENY", reason_code="UNKNOWN", policy_type="RESIDENTIAL",
+            policy_version=1, evaluated_at=denied.captured_at, response_status="NOT_CONFIGURED",
+            barrier_intent="NONE", physical_execution="NOT_IMPLEMENTED"),
+        AccessDecision(recognition_event_id=reviewed.id, site_id=site.id, camera_id=entry.id,
+            access_status="NOT_LISTED", decision="REVIEW", reason_code="UNKNOWN", policy_type="RESIDENTIAL",
+            policy_version=1, evaluated_at=reviewed.captured_at, response_status="NOT_CONFIGURED",
+            barrier_intent="NONE", physical_execution="NOT_IMPLEMENTED"),
+    ))
+    db.commit(); login(client)
+
+    page = client.get("/operations", params={"site":str(site.id), "camera":str(entry.id)})
+    payload = client.get("/api/operations/console", params={"site":str(site.id), "camera":str(entry.id)}).json()
+
+    assert page.status_code == 200 and "Open Barrier" in page.text
+    assert payload["statistics"] == {"entries":2, "exits":1, "on_site":1}
+    assert payload["latest"]["id"] == str(latest_live.id)
+    assert payload["latest"]["plate"] == "RAW123" and payload["latest"]["corrected"] is True
+    assert payload["latest"]["session_status"] == "Open"
+    assert payload["recent"][0]["id"] == str(recovered.id)
+    assert payload["recent"][0]["source"] == "OFFLINE_RECOVERY"
+    assert "RECOVERED" in page.text
+
+
+def test_persistent_console_handles_no_camera_and_media_permission(client: TestClient, db: Session) -> None:
+    create_user(db, ("operations.view",)); site = Site(code="EMPTY", name="Empty Site", timezone="Asia/Kuala_Lumpur", is_active=True)
+    db.add(site); db.commit(); login(client)
+
+    page = client.get("/operations")
+
+    assert page.status_code == 200
+    assert "No lane camera available" in page.text
+    assert "None" not in page.text
+    assert client.get(f"/media/cameras/{uuid4()}/live-stream").status_code == 403
 
 
 def test_operations_date_filters_and_blank_query_values(client: TestClient, db: Session) -> None:

@@ -23,7 +23,7 @@
 {% if error %}<div class="form-alert" role="alert">{{ error }}</div>{% endif %}
 
 <section class="ops-panel operations-filters" aria-label="Lane filters">
-    <form method="get" action="/operations" class="filter-grid filter-grid--primary">
+    <form method="get" action="/operations/history" class="filter-grid filter-grid--primary">
         <div class="field-group"><label for="ops-site">Site</label><select id="ops-site" name="site"><option value="">All sites</option>{% for site in sites %}<option value="{{ site.id }}" {% if filters.site == site.id|string %}selected{% endif %}>{{ site.code }} &middot; {{ site.name }}</option>{% endfor %}</select></div>
         <div class="field-group"><label for="ops-camera">Lane</label><select id="ops-camera" name="camera"><option value="">All lanes</option>{% for camera in cameras %}<option value="{{ camera.id }}" {% if filters.camera == camera.id|string %}selected{% endif %}>{{ camera.name }} &middot; {{ camera.lane_role }}</option>{% endfor %}</select></div>
         <div class="field-group"><label for="ops-q">Plate or reference</label><input id="ops-q" name="q" value="{{ filters.q }}" maxlength="120" placeholder="PFQ5217"></div>
@@ -37,7 +37,7 @@
                 <div class="field-group"><label for="ops-to">To</label><input id="ops-to" type="date" name="date_to" value="{{ filters.date_to }}"></div>
             </div>
         </details>
-        <div class="filter-actions"><button class="button-primary button-primary--compact" type="submit">Apply</button><a class="button-quiet" href="/operations">Clear</a></div>
+        <div class="filter-actions"><button class="button-primary button-primary--compact" type="submit">Apply</button><a class="button-quiet" href="/operations/history">Clear</a></div>
     </form>
 </section>
 

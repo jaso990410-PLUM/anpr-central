@@ -1,0 +1,72 @@
+{% extends "base_app.html" %}
+{% block title %}Lane Operations &middot; ANPR Central{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', path='/css/operations.css') }}?v=20261016.1">{% endblock %}
+{% block content %}
+<div class="lane-console" data-lane-console{% if selected_site %} data-site-id="{{ selected_site.id }}"{% endif %}{% if selected_camera %} data-camera-id="{{ selected_camera.id }}"{% endif %} data-poll-seconds="{{ live_poll_seconds }}">
+    <header class="page-header operations-page-header">
+        <div><p class="eyebrow">Persistent guard workspace</p><h1>Lane Operations</h1><p>Live lane awareness, admission activity, and safe operator action.</p></div>
+        <div class="page-header-actions"><span class="status-badge status-badge--online" data-console-status>LIVE MODE</span><a class="button-secondary" href="/operations/history{% if selected_site %}?site={{ selected_site.id }}{% endif %}">Search Records / History</a><a class="button-quiet" href="/operations/watchlist">Watchlist</a></div>
+    </header>
+
+    <section class="lane-console-toolbar ops-panel" aria-label="Lane selection">
+        <form method="get" action="/operations" class="lane-selector" data-lane-selector>
+            <div class="field-group"><label for="lane-console-site">Site</label><select id="lane-console-site" name="site" data-console-site>{% for site in sites %}<option value="{{ site.id }}" {% if selected_site and site.id == selected_site.id %}selected{% endif %}>{{ site.code }} &middot; {{ site.name }}</option>{% endfor %}</select></div>
+            <div class="field-group"><label for="lane-console-camera">Lane / Camera</label><select id="lane-console-camera" name="camera" data-console-camera {% if not cameras %}disabled{% endif %}>{% for camera in cameras %}<option value="{{ camera.id }}" {% if selected_camera and camera.id == selected_camera.id %}selected{% endif %}>{{ camera.name }} &middot; {{ camera.lane_role }} &middot; {{ camera.code }}</option>{% else %}<option>No enabled lanes</option>{% endfor %}</select></div>
+        </form>
+        {% if selected_camera %}<div class="lane-identity"><span>Selected lane</span><strong>{{ selected_camera.name }}</strong><small>{{ selected_camera.code }} &middot; {{ selected_camera.lane_role }} &middot; {{ selected_camera.connection_state or 'Unknown' }}</small></div>{% endif %}
+    </section>
+
+    <section class="lane-statistics" aria-label="Today's admitted traffic">
+        <article class="ops-panel lane-stat"><span>Today's Entry</span><strong data-stat-entry>{{ console.statistics.entries }}</strong><small>Admitted session openings</small></article>
+        <article class="ops-panel lane-stat"><span>Today's Exit</span><strong data-stat-exit>{{ console.statistics.exits }}</strong><small>Admitted session closures</small></article>
+        <article class="ops-panel lane-stat"><span>Currently On Site</span><strong data-stat-on-site>{{ console.statistics.on_site }}</strong><small>Open parking sessions</small></article>
+    </section>
+    <p class="lane-statistics-note">Operational counts represent Central parking-session state, not independently confirmed physical passage.</p>
+
+    <div class="lane-console-primary">
+        <section class="ops-panel lane-live-panel" aria-labelledby="lane-live-title">
+            <header class="panel-header"><div><p class="panel-kicker">Persistent selected lane</p><h2 id="lane-live-title">Live Video</h2></div><span class="status-badge status-badge--{{ 'warning' if live_available else 'neutral' }}" data-lane-live-status>{{ 'CONNECTING' if live_available else 'UNAVAILABLE' }}</span></header>
+            <div class="lane-live-shell">
+                {% if selected_camera and live_available %}<video controls autoplay muted playsinline preload="none" data-stream-url="/media/cameras/{{ selected_camera.id }}/live-stream" data-lane-live-video></video><div class="lane-live-message" data-lane-live-message>Connecting to {{ selected_camera.name }}&hellip;</div>
+                {% elif selected_camera and not can_view_media %}<div class="empty-state"><strong>Live view unavailable</strong><span>Media viewing permission is required. Recognition and recording continue independently.</span></div>
+                {% elif selected_camera %}<div class="empty-state"><strong>Live stream not configured</strong><span>Configure an enabled camera media source. Recognition and recording are unaffected.</span></div>
+                {% else %}<div class="empty-state"><strong>No lane camera available</strong><span>Add or enable a camera before using the live console.</span></div>{% endif %}
+            </div>
+        </section>
+
+        {% set latest = console.latest %}
+        <section class="ops-panel latest-vehicle-panel" aria-labelledby="latest-vehicle-title" data-latest-panel>
+            <header class="panel-header"><div><p class="panel-kicker">Latest live recognition</p><h2 id="latest-vehicle-title">Latest Vehicle</h2></div><span class="status-badge status-badge--neutral" data-latest-lane>{{ latest.lane_role if latest else 'Waiting' }}</span></header>
+            <div class="latest-vehicle-empty" data-latest-empty {% if latest %}hidden{% endif %}><strong>No live recognition yet</strong><span>Recovered offline records remain in Recent Access but never replace this card.</span></div>
+            <article class="latest-vehicle" data-latest-content {% if not latest %}hidden{% endif %}>
+                <div class="latest-scene" data-latest-scene>{% if latest and latest.scene_url %}<img src="{{ latest.scene_url }}" alt="Latest recognition scene">{% else %}<span>Snapshot unavailable</span>{% endif %}</div>
+                <div class="latest-plate-row"><div class="latest-plate-crop" data-latest-plate-image>{% if latest and latest.plate_url %}<img src="{{ latest.plate_url }}" alt="Latest plate crop">{% else %}<span>Plate crop unavailable</span>{% endif %}</div><div><strong class="plate-value plate-value--large" data-latest-plate>{{ latest.plate if latest else 'Not available' }}</strong><small data-latest-correction>{% if latest and latest.corrected %}Corrected from {{ latest.raw_plate }}{% endif %}</small></div></div>
+                <div class="latest-decision"><span class="status-badge status-badge--{{ 'online' if latest and latest.decision == 'ALLOW' else 'critical' if latest and latest.decision == 'DENY' else 'warning' }}" data-latest-decision>{{ latest.decision if latest else 'Not available' }}</span><strong data-latest-profile>{{ latest.profile if latest else 'No access profile' }}</strong><small data-latest-reason>{{ latest.reason if latest else 'Not available' }}</small></div>
+                <dl class="latest-session-grid">
+                    <div><dt>Lane / Time</dt><dd data-latest-lane-time>{% if latest %}{{ latest.camera }} &middot; {{ latest.captured }}{% else %}Not available{% endif %}</dd></div>
+                    <div><dt>Access</dt><dd data-latest-access>{{ latest.access if latest else 'Not available' }}</dd></div>
+                    <div><dt>Session</dt><dd data-latest-session>{{ latest.session_status if latest else 'Not available' }}</dd></div>
+                    <div><dt>Entry</dt><dd data-latest-entry>{{ latest.entry_time if latest else 'Not available' }}</dd></div>
+                    <div><dt>Exit</dt><dd data-latest-exit>{{ latest.exit_time if latest else 'Not available' }}</dd></div>
+                    <div><dt>Stay</dt><dd data-latest-stay>{{ latest.stay if latest else 'Not available' }}</dd></div>
+                    <div><dt>Barrier feedback</dt><dd data-latest-barrier>{{ latest.barrier_state|replace('_',' ')|title if latest else 'Unknown' }}</dd></div>
+                    <div><dt>Security</dt><dd data-latest-watch>{{ latest.watch if latest and latest.watch else 'No watch flag' }}</dd></div>
+                </dl>
+                <div class="primary-actions latest-actions">
+                    {% if can_view_media %}<a class="button-secondary" data-latest-event-video href="{{ latest.event_video_url if latest else '#' }}" {% if not latest %}hidden{% endif %}>Event Video</a><a class="button-quiet" data-latest-recording href="{{ latest.recording_url if latest else '#' }}" {% if not latest %}hidden{% endif %}>Full Recording</a>{% endif %}
+                    <a class="button-quiet" data-latest-details href="{{ latest.operations_url if latest else '#' }}" {% if not latest %}hidden{% endif %}>Event Details</a>
+                    {% if can_operate_barrier %}<button class="button-secondary button-secondary--critical" type="button" data-open-dialog="console-open-barrier" data-latest-open-barrier {% if not latest %}hidden{% endif %}>Open Barrier</button>{% endif %}
+                </div>
+            </article>
+        </section>
+    </div>
+
+    <section class="ops-panel lane-recent-panel" aria-labelledby="recent-access-title" data-console-recent>
+        <header class="panel-header"><div><p class="panel-kicker">Selected lane</p><h2 id="recent-access-title">Recent Access Records</h2></div><a class="table-link" href="/operations/history{% if selected_site %}?site={{ selected_site.id }}{% if selected_camera %}&amp;camera={{ selected_camera.id }}{% endif %}{% endif %}">Search Records / View History</a></header>
+        <div class="recent-access-strip" data-recent-access-strip>{% for item in console.recent %}<a class="recent-access-card" href="/operations/events/{{ item.id }}" data-event-id="{{ item.id }}"><div class="recent-access-image">{% if item.scene_url %}<img src="{{ item.scene_url }}" alt="Scene for {{ item.plate }}">{% else %}<span>Snapshot unavailable</span>{% endif %}</div><div class="recent-access-card__body"><div><strong class="plate-value">{{ item.plate }}</strong>{% if item.corrected %}<small>Corrected from {{ item.raw_plate }}</small>{% endif %}</div><span>{{ item.camera }} &middot; {{ item.lane_role }}</span><time>{{ item.captured }}</time><div><span class="status-badge status-badge--{{ 'online' if item.decision == 'ALLOW' else 'critical' if item.decision == 'DENY' else 'warning' }}">{{ item.decision }}</span>{% if item.source == 'OFFLINE_RECOVERY' %}<span class="status-badge status-badge--neutral">RECOVERED</span>{% endif %}{% if item.watch %}<span class="status-badge status-badge--critical">WATCH</span>{% endif %}</div></div></a>{% else %}<div class="empty-state"><strong>No recent access records</strong><span>Events for this lane will appear here.</span></div>{% endfor %}</div>
+    </section>
+
+    {% if can_operate_barrier %}<dialog class="operations-dialog operations-dialog--danger" id="console-open-barrier" aria-labelledby="console-barrier-title"><form method="post" action="{% if latest %}/operations/events/{{ latest.id }}/open-barrier{% endif %}" data-console-barrier-form><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><header><p class="panel-kicker">Physical action &middot; existing M17 manual release</p><h3 id="console-barrier-title">Open Barrier</h3></header><dl class="detail-list"><div><dt>Vehicle</dt><dd data-barrier-plate>{{ latest.plate if latest else 'Not available' }}</dd></div><div><dt>Original decision</dt><dd data-barrier-decision>{{ latest.decision if latest else 'Not available' }}</dd></div></dl><div class="field-group"><label for="console-barrier-reason">Operator reason</label><input id="console-barrier-reason" name="reason" minlength="3" maxlength="500" required></div><div class="field-group"><label for="console-barrier-confirmation">Type OPEN GATE to confirm</label><input id="console-barrier-confirmation" name="confirmation" autocomplete="off" required></div><p class="panel-note">This creates a durable manual BarrierAction. It does not rewrite the access decision or parking session.</p><div class="dialog-actions"><button class="button-quiet" type="button" data-close-dialog>Cancel</button><button class="button-secondary button-secondary--critical" type="submit">Open Barrier</button></div></form></dialog>{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='/js/operations-live.js') }}?v=20261016.1" defer></script>{% endblock %}

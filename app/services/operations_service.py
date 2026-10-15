@@ -48,6 +48,38 @@ class OperationsService:
             query = query.where(Camera.site_id == site_id)
         return tuple(self.db.scalars(query).all())
 
+    def today_statistics(self, site: Site, *, now: datetime | None = None) -> dict[str, int]:
+        zone = self._site_timezone(site.id)
+        local_now = _utc(now or datetime.now(timezone.utc)).astimezone(zone)
+        start = datetime.combine(local_now.date(), time.min, zone).astimezone(timezone.utc)
+        end = start + timedelta(days=1)
+        entries = self.db.scalar(select(func.count()).select_from(ParkingSession).where(
+            ParkingSession.site_id == site.id,
+            ParkingSession.entered_at >= start,
+            ParkingSession.entered_at < end,
+        )) or 0
+        exits = self.db.scalar(select(func.count()).select_from(ParkingSession).where(
+            ParkingSession.site_id == site.id,
+            ParkingSession.exited_at.is_not(None),
+            ParkingSession.exited_at >= start,
+            ParkingSession.exited_at < end,
+        )) or 0
+        on_site = self.db.scalar(select(func.count()).select_from(ParkingSession).where(
+            ParkingSession.site_id == site.id,
+            ParkingSession.status.in_(("OPEN", "OVERSTAY")),
+        )) or 0
+        return {"entries": entries, "exits": exits, "on_site": on_site}
+
+    def latest_live_event(self, *, site_id: UUID, camera_id: UUID) -> RecognitionEvent | None:
+        return self.db.scalar(select(RecognitionEvent).where(
+            RecognitionEvent.site_id == site_id,
+            RecognitionEvent.camera_id == camera_id,
+            RecognitionEvent.source == "LIVE",
+        ).order_by(
+            func.coalesce(RecognitionEvent.captured_at, RecognitionEvent.received_at).desc(),
+            RecognitionEvent.id.desc(),
+        ).limit(1))
+
     def recent(
         self,
         *,
@@ -329,9 +361,58 @@ class OperationsService:
             "session": issue.issue_type.replace("_", " ").title() if issue and issue.status == "OPEN" else "Normal",
             "exception": issue.issue_type.replace("_", " ").title() if issue and issue.status == "OPEN" else None,
             "watch": watch.severity.replace("_", " ").title() if watch else None,
+            "source": event.source,
             "captured": self._display(event.captured_at or event.received_at, site.timezone),
             "captured_iso": _utc(event.captured_at or event.received_at).isoformat(),
             "updated_at": _utc(event.updated_at).isoformat(),
+            "scene_url": f"/operations/events/{event.id}/image/scene" if event.scene_image_path else None,
+            "plate_url": f"/operations/events/{event.id}/image/plate" if event.plate_image_path else None,
+        }
+
+    def console_latest(self, event: RecognitionEvent | None) -> dict[str, object] | None:
+        if event is None:
+            return None
+        detail = self.detail(event.id)
+        if detail is None:
+            return None
+        session = detail["session"]
+        now = datetime.now(timezone.utc)
+        stay_end = _utc(session.exited_at) if session and session.exited_at else now
+        stay_seconds = max(0, int((stay_end - _utc(session.entered_at)).total_seconds())) if session else None
+        stay = None
+        if stay_seconds is not None:
+            hours, remainder = divmod(stay_seconds, 3600)
+            minutes = remainder // 60
+            stay = f"{hours}h {minutes}m" if hours else f"{minutes}m"
+        decision = detail["decision"]
+        access = detail["access"]
+        barrier_state = detail["barrier_state"]
+        return {
+            "id": str(event.id),
+            "plate": detail["effective_plate"],
+            "raw_plate": detail["raw_plate"],
+            "corrected": detail["effective_plate"] != detail["raw_plate"],
+            "camera": event.camera.name,
+            "camera_code": event.camera.code,
+            "lane_role": event.camera.lane_role,
+            "captured": detail["captured_display"],
+            "captured_iso": detail["captured_iso"],
+            "decision": decision.decision if decision else "LEGACY / NOT EVALUATED",
+            "reason": decision.reason_code.replace("_", " ").title() if decision else "No historical decision available",
+            "access": ("Whitelist" if access.list_type == "ALLOW" else "Blacklist") if access else "Not listed",
+            "profile": access.access_profile.name if access and access.access_profile else "No access profile",
+            "watch": detail["watch"].severity.replace("_", " ").title() if detail["watch"] else None,
+            "scene_url": detail["scene_url"],
+            "plate_url": detail["plate_url"],
+            "event_video_url": f"/media/events/{event.id}",
+            "recording_url": f"/media/playback?camera={event.camera_id}&event={event.id}&zoom=15m",
+            "operations_url": f"/operations/events/{event.id}",
+            "session_status": session.status.title() if session else "No linked session",
+            "entry_time": self._display(session.entered_at, event.site.timezone) if session else "Not available",
+            "exit_time": self._display(session.exited_at, event.site.timezone) if session and session.exited_at else "Not available",
+            "stay": stay or "Not available",
+            "barrier_state": barrier_state.normalized_state if barrier_state else "UNKNOWN",
+            "updated_at": detail["updated_iso"],
         }
 
     @staticmethod
@@ -340,7 +421,7 @@ class OperationsService:
             zone = ZoneInfo(timezone_name)
         except ZoneInfoNotFoundError:
             zone = timezone.utc
-        return _utc(value).astimezone(zone).strftime("%d %b %Y %H:%M:%S")
+        return _utc(value).astimezone(zone).strftime("%d %b %Y · %H:%M:%S")
 
 
 _CONFUSABLE = {frozenset(pair) for pair in (("0", "O"), ("0", "Q"), ("O", "Q"), ("1", "I"), ("5", "S"), ("6", "G"), ("8", "B"), ("2", "Z"))}
