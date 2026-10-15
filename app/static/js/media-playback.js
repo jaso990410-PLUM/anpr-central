@@ -19,6 +19,7 @@
     let selectedEvent = data.event;
     let playing = false;
     let syncing = false;
+    let dragging = false;
     let viewStart = dayStart;
     let viewEnd = dayEnd;
 
@@ -162,6 +163,7 @@
             state.textContent = "Preparing";
             video.load();
             video.addEventListener("loadedmetadata", () => {
+                video.dataset.mediaOrigin = String(video.seekable.length ? video.seekable.start(0) : video.currentTime);
                 message.hidden = true;
                 state.textContent = "Recorded";
                 if (autoplay) video.play().catch(() => {});
@@ -175,31 +177,10 @@
     }
 
     function seek(epoch, autoplay = playing) {
-        const master = players[0];
-        const start = Number(master?.dataset.windowStart);
-        const end = Number(master?.dataset.windowEnd);
-        if (master && Number.isFinite(start) && epoch >= start && epoch < end) {
-            masterTime = epoch;
-            let reloadRequired = false;
-            players.forEach((video) => {
-                const windowStart = Number(video.dataset.windowStart);
-                const windowEnd = Number(video.dataset.windowEnd);
-                if (Number.isFinite(windowStart) && epoch >= windowStart && epoch < windowEnd) {
-                    video.currentTime = (epoch - windowStart) / 1000;
-                    if (autoplay) video.play().catch(() => {});
-                } else {
-                    reloadRequired = true;
-                }
-            });
-            if (reloadRequired) {
-                loadPlayers(epoch, autoplay);
-                return;
-            }
-            renderTimeline();
-            updateUrl();
-        } else {
-            loadPlayers(epoch, autoplay);
-        }
+        // Historical playback is a sequential fragmented MP4 response. A native
+        // seek may not be buffered yet, so reload a bounded stream at the exact
+        // requested timestamp instead of moving only the visible playhead.
+        loadPlayers(epoch, autoplay);
     }
 
     function selectMarker(marker) {
@@ -222,12 +203,22 @@
 
     timeline?.addEventListener("pointerdown", (event) => {
         if (event.target.closest(".timeline-marker")) return;
+        dragging = true;
         timeline.setPointerCapture(event.pointerId);
-        seek(timelineEpoch(event.clientX), false);
+        masterTime = timelineEpoch(event.clientX);
+        updatePlayhead();
     });
     timeline?.addEventListener("pointermove", (event) => {
-        if (timeline.hasPointerCapture(event.pointerId)) seek(timelineEpoch(event.clientX), false);
+        if (!dragging || !timeline.hasPointerCapture(event.pointerId)) return;
+        masterTime = timelineEpoch(event.clientX);
+        updatePlayhead();
     });
+    timeline?.addEventListener("pointerup", (event) => {
+        if (!dragging) return;
+        dragging = false;
+        loadPlayers(timelineEpoch(event.clientX), false);
+    });
+    timeline?.addEventListener("pointercancel", () => { dragging = false; });
     timeline?.addEventListener("keydown", (event) => {
         if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
         event.preventDefault();
@@ -250,10 +241,12 @@
         video.addEventListener("timeupdate", () => {
             if (index !== 0 || syncing || !Number.isFinite(Number(video.dataset.windowStart))) return;
             syncing = true;
-            masterTime = Number(video.dataset.windowStart) + video.currentTime * 1000;
+            const mediaOrigin = Number(video.dataset.mediaOrigin) || 0;
+            masterTime = Number(video.dataset.windowStart) + Math.max(0, video.currentTime - mediaOrigin) * 1000;
             players.slice(1).forEach((peer) => {
                 const peerStart = Number(peer.dataset.windowStart);
-                const target = (masterTime - peerStart) / 1000;
+                const peerOrigin = Number(peer.dataset.mediaOrigin) || 0;
+                const target = peerOrigin + (masterTime - peerStart) / 1000;
                 if (Number.isFinite(target) && Math.abs(peer.currentTime - target) > 1.5 && target >= 0 && target <= peer.duration) peer.currentTime = target;
             });
             updatePlayhead();
