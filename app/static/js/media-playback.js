@@ -14,6 +14,7 @@
     const gapNotice = root.querySelector("[data-gap-notice]");
     const players = [...root.querySelectorAll("[data-playback-video]")];
     const zoomSelect = root.querySelector("[data-timeline-zoom]");
+    const eventLeadInSelect = root.querySelector("[data-event-lead-in]");
     const zoomDurations = { "24h": dayEnd - dayStart, "6h": 21600000, "1h": 3600000, "15m": 900000 };
     let masterTime = Math.min(dayEnd - 1, Math.max(dayStart, Date.parse(data.playhead)));
     let selectedEvent = data.event;
@@ -25,7 +26,7 @@
     let loadGeneration = 0;
     let eventCueAt = null;
     let eventCueShown = false;
-    const EVENT_PREROLL_MS = 2000;
+    let eventPrerollMs = Number(data.eventPrerollSeconds || 10) * 1000;
 
     const cameraData = new Map(data.cameras.map((camera) => [camera.id, camera]));
     const formatDateTime = (epoch) => new Intl.DateTimeFormat("en-GB", {
@@ -121,6 +122,7 @@
         url.searchParams.set("date", new Intl.DateTimeFormat("en-CA", { timeZone: data.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(masterTime)));
         url.searchParams.set("time", iso(masterTime));
         url.searchParams.set("zoom", zoomSelect?.value || "24h");
+        url.searchParams.set("lead_in", String(eventPrerollMs / 1000));
         url.searchParams.delete("start");
         url.searchParams.delete("end");
         if (selectedEvent) url.searchParams.set("event", selectedEvent); else url.searchParams.delete("event");
@@ -233,7 +235,8 @@
         });
         preparationConfigured = true;
         if (eventCueAt !== null) {
-            showGap("Preparing event footage · playback will start two seconds before recognition");
+            const seconds = eventPrerollMs / 1000;
+            showGap(`Preparing event footage · playback will start ${seconds} seconds before recognition`);
         }
         if (!availablePlayers.length) finishPreparation();
         renderTimeline();
@@ -251,7 +254,7 @@
         selectedEvent = marker.id;
         root.querySelectorAll(".playback-event-row").forEach((row) => row.classList.toggle("is-selected", row.dataset.eventId === marker.id));
         const recognitionAt = Date.parse(marker.at);
-        loadPlayers(recognitionAt - EVENT_PREROLL_MS, true, recognitionAt);
+        loadPlayers(recognitionAt - eventPrerollMs, true, recognitionAt);
     }
 
     function eventRelative(direction) {
@@ -291,6 +294,10 @@
     });
 
     zoomSelect?.addEventListener("change", () => { renderTimeline(); updateUrl(); });
+    eventLeadInSelect?.addEventListener("change", (event) => {
+        eventPrerollMs = Number(event.target.value) * 1000;
+        updateUrl();
+    });
     root.querySelectorAll("[data-skip]").forEach((button) => button.addEventListener("click", () => seek(masterTime + Number(button.dataset.skip) * 1000)));
     root.querySelector("[data-previous-event]")?.addEventListener("click", () => eventRelative(-1));
     root.querySelector("[data-next-event]")?.addEventListener("click", () => eventRelative(1));

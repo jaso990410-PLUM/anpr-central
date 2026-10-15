@@ -199,6 +199,7 @@ def playback_workspace(
     selected_time: str = Query(default="", alias="time"),
     zoom: str = "24h",
     event: str = "",
+    lead_in: int = Query(default=10, ge=2, le=30),
     start: str = "",
     end: str = "",
     user: User = Depends(require_page_permission("media.view")),
@@ -247,7 +248,7 @@ def playback_workspace(
         selected_source = MediaConfigurationService(db).source_for_camera(selected_event.camera_id)
         playhead = utc(selected_event.captured_at or selected_event.received_at) + timedelta(
             milliseconds=selected_source.media_time_offset_ms if selected_source else 0
-        ) - timedelta(seconds=2)
+        ) - timedelta(seconds=lead_in)
     elif selected_time:
         try:
             playhead = _parse_utc(selected_time, naive_timezone=selected_site.timezone)
@@ -320,6 +321,7 @@ def playback_workspace(
         "playhead": playhead.isoformat().replace("+00:00", "Z"),
         "zoom": zoom,
         "event": str(selected_event.id) if selected_event else None,
+        "eventPrerollSeconds": lead_in,
         "advancedEnd": advanced_end.isoformat().replace("+00:00", "Z") if advanced_end else None,
         "cameras": camera_data,
         "markers": markers,

@@ -59,6 +59,7 @@
                 <button type="button" class="button-primary" data-play-toggle>Play</button>
                 <button type="button" class="button-secondary" data-skip="10">+10s</button>
                 <button type="button" class="button-quiet" data-next-event title="Next recognition">Next Event</button>
+                <label class="playback-speed">Event lead-in <select data-event-lead-in>{% for seconds in (2,5,10,15,30) %}<option value="{{ seconds }}" {% if workspace_data.eventPrerollSeconds == seconds %}selected{% endif %}>{{ seconds }} sec</option>{% endfor %}</select></label>
                 <label class="playback-speed">Speed <select data-playback-speed>{% for speed in ('0.5','1','2','4') %}<option value="{{ speed }}" {% if speed == '1' %}selected{% endif %}>{{ speed }}x</option>{% endfor %}</select></label>
                 <button type="button" class="button-quiet" data-fullscreen>Fullscreen</button>
             </div>
@@ -72,4 +73,4 @@
 </div>
 <script type="application/json" id="playback-workspace-data">{{ workspace_data|tojson }}</script>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', path='/js/media-playback.js') }}?v=20261015.3" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='/js/media-playback.js') }}?v=20261015.4" defer></script>{% endblock %}

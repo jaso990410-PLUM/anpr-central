@@ -253,8 +253,20 @@ def test_playback_workspace_renders_calendar_gaps_markers_and_local_time(client,
     assert len(payload["cameras"][0]["coverage"]) == 2
     assert payload["markers"][0]["local_time"] == "00:25:00"
     assert payload["markers"][0]["at"] == "2026-10-14T16:25:01.500000Z"
-    assert payload["playhead"] == "2026-10-14T16:24:59.500000Z"
-    assert "media-playback.js?v=20261015.3" in page.text
+    assert payload["playhead"] == "2026-10-14T16:24:51.500000Z"
+    assert payload["eventPrerollSeconds"] == 10
+    assert 'data-event-lead-in' in page.text and '<option value="10" selected>' in page.text
+    assert "media-playback.js?v=20261015.4" in page.text
+
+    configured = client.get("/media/playback", params={
+        "camera":str(camera.id), "date":"2026-10-15", "event":str(recognized.id),
+        "zoom":"15m", "lead_in":15,
+    })
+    configured_payload = json.loads(re.search(
+        r'<script type="application/json" id="playback-workspace-data">(.*?)</script>', configured.text, re.S
+    ).group(1))
+    assert configured_payload["playhead"] == "2026-10-14T16:24:46.500000Z"
+    assert configured_payload["eventPrerollSeconds"] == 15
 
 
 def test_historical_stream_reencodes_for_frame_accurate_event_preroll(client, db, tmp_path, monkeypatch):
