@@ -1,15 +1,25 @@
 {% extends "base_app.html" %}
 {% block title %}Event Center &middot; ANPR Central{% endblock %}
-{% block styles %}<link rel="stylesheet" href="{{ url_for('static', path='/css/monitoring.css') }}">{% endblock %}
+{% block styles %}
+<link rel="stylesheet" href="{{ url_for('static', path='/css/monitoring.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='/css/monitoring-events.css') }}">
+{% endblock %}
 {% block content %}
-<header class="page-header">
-  <div><p class="eyebrow">Unified operational awareness</p><h1>Event Center</h1><p>Meaningful activity, attention items, and unresolved operational conditions.</p></div>
-  <span class="status-badge status-badge--neutral">Server-side projection</span>
+<header class="page-header event-center-header">
+  <div><p class="eyebrow">Unified operational awareness</p><h1>Event Center</h1><p>Operational events, security attention, and unresolved system conditions.</p></div>
+  <span class="status-badge {% if active_alert_count %}status-badge--warning{% else %}status-badge--success{% endif %}">{{ active_alert_count }} active alert{{ '' if active_alert_count == 1 else 's' }}</span>
 </header>
+
+<section class="event-summary" aria-label="Event Center summary">
+  <a href="/events?tab=alerts"><span>Active alerts</span><strong>{{ center_summary.active_alerts }}</strong><small>Unresolved conditions</small></a>
+  <a href="/events?tab=attention"><span>Attention</span><strong>{{ center_summary.attention }}</strong><small>Last 24 hours</small></a>
+  <a href="/events?tab=attention&severity=CRITICAL"><span>Critical</span><strong>{{ center_summary.critical }}</strong><small>Last 24 hours</small></a>
+  <a href="/events?tab=all"><span>Operational events</span><strong>{{ center_summary.last_24h }}</strong><small>Last 24 hours</small></a>
+</section>
 
 <nav class="monitor-tabs" aria-label="Event Center views">
   <a class="{% if tab == 'attention' %}is-active{% endif %}" href="/events?tab=attention">Attention</a>
-  <a class="{% if tab == 'alerts' %}is-active{% endif %}" href="/events?tab=alerts">Active Alerts</a>
+  <a class="{% if tab == 'alerts' %}is-active{% endif %}" href="/events?tab=alerts">Active Alerts <span>{{ active_alert_count }}</span></a>
   <a class="{% if tab == 'all' %}is-active{% endif %}" href="/events?tab=all">All Events</a>
   <a class="{% if tab == 'history' %}is-active{% endif %}" href="/events?tab=history">Alert History</a>
 </nav>
@@ -18,32 +28,56 @@
 <section class="ops-panel monitor-filter-panel">
   <form class="monitor-filters" method="get" action="/events">
     <input type="hidden" name="tab" value="{{ tab }}">
-    <label>Category<select name="category"><option value="">All categories</option>{% for value in ['TRAFFIC_ANPR','ACCESS_SECURITY','ADMIN_BUSINESS','OPERATOR_ACTION','SYSTEM_HEALTH'] %}<option value="{{ value }}" {% if filters.category == value %}selected{% endif %}>{{ value|replace('_',' ')|title }}</option>{% endfor %}</select></label>
-    <label>Event type<select name="event_type"><option value="">All event types</option>{% for value in event_types %}<option value="{{ value }}" {% if filters.event_type == value %}selected{% endif %}>{{ value|replace('_',' ')|title }}</option>{% endfor %}</select></label>
-    <label>Severity<select name="severity"><option value="">All severities</option>{% for value in ['INFO','WARNING','CRITICAL'] %}<option value="{{ value }}" {% if filters.severity == value %}selected{% endif %}>{{ value|title }}</option>{% endfor %}</select></label>
-    <label>Site<select name="site"><option value="">All sites</option>{% for item in sites %}<option value="{{ item.id }}" {% if filters.site == item.id|string %}selected{% endif %}>{{ item.code }}</option>{% endfor %}</select></label>
-    <label>Camera / lane<select name="camera"><option value="">All cameras</option>{% for item in cameras %}<option value="{{ item.id }}" {% if filters.camera == item.id|string %}selected{% endif %}>{{ item.code }}</option>{% endfor %}</select></label>
-    <label>Plate or subject<input name="search" value="{{ filters.search }}" maxlength="80" placeholder="Plate, subject, summary"></label>
-    <label>Operator<input name="operator" value="{{ filters.operator }}" maxlength="80" placeholder="Username or name"></label>
-    <label>From (site time)<input type="datetime-local" name="date_from" value="{{ filters.date_from }}"></label>
-    <label>To (site time)<input type="datetime-local" name="date_to" value="{{ filters.date_to }}"></label>
-    <div class="monitor-filter-actions"><button class="button-primary" type="submit">Apply filters</button><a class="button-quiet" href="/events?tab={{ tab }}">Clear</a></div>
+    <div class="monitor-filters__primary">
+      <label class="monitor-search">Search<input name="search" value="{{ filters.search }}" maxlength="80" placeholder="Plate, subject, or event"></label>
+      <label>Category<select name="category"><option value="">All categories</option>{% for value in ['TRAFFIC_ANPR','ACCESS_SECURITY','ADMIN_BUSINESS','OPERATOR_ACTION','SYSTEM_HEALTH'] %}<option value="{{ value }}" {% if filters.category == value %}selected{% endif %}>{{ category_label(value) }}</option>{% endfor %}</select></label>
+      <label>Severity<select name="severity"><option value="">All severities</option>{% for value in ['INFO','WARNING','CRITICAL'] %}<option value="{{ value }}" {% if filters.severity == value %}selected{% endif %}>{{ value|title }}</option>{% endfor %}</select></label>
+      <button class="button-primary" type="submit">Apply</button>
+    </div>
+    <details class="monitor-filter-more" {% if filters.event_type or filters.site or filters.camera or filters.operator or filters.date_from or filters.date_to %}open{% endif %}>
+      <summary>More filters</summary>
+      <div class="monitor-filters__advanced">
+        <label>Event type<select name="event_type"><option value="">All event types</option>{% for value in event_types %}<option value="{{ value }}" {% if filters.event_type == value %}selected{% endif %}>{{ value|replace('_',' ')|title }}</option>{% endfor %}</select></label>
+        <label>Site<select name="site"><option value="">All sites</option>{% for item in sites %}<option value="{{ item.id }}" {% if filters.site == item.id|string %}selected{% endif %}>{{ item.code }}</option>{% endfor %}</select></label>
+        <label>Camera / lane<select name="camera"><option value="">All cameras</option>{% for item in cameras %}<option value="{{ item.id }}" {% if filters.camera == item.id|string %}selected{% endif %}>{{ item.code }}</option>{% endfor %}</select></label>
+        <label>Operator<input name="operator" value="{{ filters.operator }}" maxlength="80" placeholder="Username or name"></label>
+        <label>From (site time)<input type="datetime-local" name="date_from" value="{{ filters.date_from }}"></label>
+        <label>To (site time)<input type="datetime-local" name="date_to" value="{{ filters.date_to }}"></label>
+      </div>
+    </details>
+    <div class="monitor-filter-actions"><button class="button-secondary" type="submit">Apply all filters</button><a class="button-quiet" href="/events?tab={{ tab }}">Clear filters</a></div>
   </form>
 </section>
 
-<div class="monitor-new-events" data-monitor-new-events hidden><strong data-monitor-new-count>0</strong> newer events are available. <a href="{{ request.url }}">Refresh list</a></div>
-<section class="ops-panel">
-  <header class="panel-header"><div><p class="panel-kicker">{% if tab == 'attention' %}Human review{% else %}Bounded event history{% endif %}</p><h2>{% if tab == 'attention' %}Attention events{% else %}All events{% endif %}</h2></div><span>{{ event_page.total }} records</span></header>
-  <div class="monitor-event-list" data-monitor-event-list data-latest-at="{% if event_page.items %}{{ event_page.items[0].occurred_at.isoformat() }}{% endif %}">
+<div class="monitor-new-events" data-monitor-new-events hidden>
+  <strong><span data-monitor-new-count>0</span> new event<span data-monitor-new-plural>s</span></strong>
+  <span>New activity is waiting. Your current list has not moved.</span>
+  <a class="button-primary" href="{{ request.url }}">Show new events</a>
+</div>
+
+<section class="ops-panel monitor-feed-panel">
+  <header class="panel-header"><div><p class="panel-kicker">{% if tab == 'attention' %}Needs attention{% else %}Operational history{% endif %}</p><h2>{% if tab == 'attention' %}Priority activity{% else %}All events{% endif %}</h2></div><span>{{ event_page.total }} records</span></header>
+  <div class="monitor-event-list" data-monitor-event-list data-view="{{ tab }}" data-latest-at="{% if event_page.items %}{{ event_page.items[0].occurred_at.isoformat() }}{% else %}{{ poll_after }}{% endif %}">
+  {% set grouping = namespace(last='') %}
   {% for item in event_page.items %}
-    <article class="monitor-event monitor-event--{{ item.severity|lower }}">
-      <time class="data-text">{{ display_time(item.occurred_at, item.site.timezone if item.site else none) }}</time>
-      <span class="status-badge monitor-severity monitor-severity--{{ item.severity|lower }}">{{ item.severity }}</span>
-      <div class="monitor-event__body"><p class="panel-kicker">{{ item.category|replace('_',' ') }}</p><h3>{{ item.event_type|replace('_',' ')|title }}</h3><strong>{{ item.display_subject }}</strong><p>{{ item.summary }}</p></div>
-      <div class="monitor-event__context"><span>{{ item.site.code if item.site else 'System' }}</span><span>{{ item.camera.code if item.camera else 'No camera' }}</span></div>
-      <div class="monitor-event__actions"><a class="button-secondary" href="/events/{{ item.id }}">View Event</a>{% if source_url(item) %}<a class="button-quiet" href="{{ source_url(item) }}">Open Source</a>{% endif %}</div>
+    {% set group = date_group(item) %}{% if group != grouping.last %}<h3 class="monitor-date-group">{{ group }}</h3>{% set grouping.last = group %}{% endif %}
+    {% set linked_alert = event_alerts.get(item.id) %}
+    <article class="monitor-event monitor-event--{{ item.severity|lower }} {% if is_major(item) %}monitor-event--major{% else %}monitor-event--compact{% endif %}">
+      <div class="monitor-event__signal"><span class="monitor-category-icon" aria-hidden="true">{{ category_icon(item.category) }}</span><span class="status-badge monitor-severity monitor-severity--{{ item.severity|lower }}">{{ item.severity }}</span></div>
+      <div class="monitor-event__body">
+        <div class="monitor-event__meta"><span>{{ category_label(item.category) }}</span><time class="data-text">{{ display_time(item.occurred_at, item.site.timezone if item.site else none) }}</time></div>
+        <h3>{{ item.event_type|replace('_',' ')|title }}</h3><strong class="monitor-event__subject">{{ item.display_subject }}</strong><p>{{ item.summary }}</p>
+        <div class="monitor-event__facts">{% for value in event_context(item) %}<span>{{ value }}</span>{% endfor %}{% if correlation_counts.get(item.correlation_id) %}<a href="/events/{{ item.id }}">{{ correlation_counts[item.correlation_id] - 1 }} related event{{ '' if correlation_counts[item.correlation_id] == 2 else 's' }}</a>{% endif %}</div>
+      </div>
+      <div class="monitor-event__state">{% if linked_alert %}<span class="monitor-lifecycle"><small>Alert status</small><strong>{{ linked_alert.status|title }}</strong></span>{% elif item.attention_required %}<span class="status-badge status-badge--warning">Attention</span>{% endif %}</div>
+      <div class="monitor-event__actions">
+        <a class="button-secondary" href="/events/{{ item.id }}">View Event</a>
+        {% if linked_alert %}<a class="button-quiet" href="/alerts/{{ linked_alert.id }}">View Alert</a>{% endif %}
+        {% if source_url(item) %}<a class="button-quiet" href="{{ source_url(item) }}">{{ source_action(item) }}</a>{% endif %}
+        {% if can_view_media and event_video_url(item) %}<a class="button-quiet" href="{{ event_video_url(item) }}">View Video</a>{% endif %}
+      </div>
     </article>
-  {% else %}<div class="empty-state"><strong>No events match this view</strong><span>The monitor projects compact records from authoritative modules.</span></div>{% endfor %}
+  {% else %}<div class="empty-state"><strong>No events match this view</strong><span>Try clearing filters or open All Events for broader operational history.</span></div>{% endfor %}
   </div>
   {% if event_page.page_count > 1 %}<footer class="monitor-pagination"><span>Page {{ event_page.page }} of {{ event_page.page_count }}</span>{% if event_page.page > 1 %}<a href="{{ request.url.include_query_params(page=event_page.page-1) }}">Previous</a>{% endif %}{% if event_page.page < event_page.page_count %}<a href="{{ request.url.include_query_params(page=event_page.page+1) }}">Next</a>{% endif %}</footer>{% endif %}
 </section>
@@ -53,12 +87,12 @@
   <div class="alert-grid">
   {% for alert in alerts %}
     <article class="alert-card alert-card--{{ alert.severity|lower }}">
-      <div><span class="status-badge monitor-severity--{{ alert.severity|lower }}">{{ alert.severity }}</span><span class="status-badge status-badge--neutral">{{ alert.status }}</span></div>
-      <h3>{{ alert.title }}</h3><p>{{ alert.summary }}</p>
-      <dl><div><dt>Component</dt><dd>{{ alert.component_type|replace('_',' ')|title }} &middot; {{ alert.component_id }}</dd></div><div><dt>Last observed</dt><dd>{{ display_time(alert.last_seen_at, alert.site.timezone if alert.site else none) }}</dd></div><div><dt>Occurrences</dt><dd>{{ alert.occurrence_count }}</dd></div></dl>
-      <a class="button-secondary" href="/alerts/{{ alert.id }}">View Details</a>
+      <div class="alert-card__badges"><span class="status-badge monitor-severity--{{ alert.severity|lower }}">{{ alert.severity }}</span><span class="status-badge monitor-alert-status monitor-alert-status--{{ alert.status|lower }}">{{ alert.status }}</span></div>
+      <p class="panel-kicker">{{ alert.component_type|replace('_',' ')|title }}</p><h3>{{ alert.title }}</h3><p>{{ alert.summary }}</p>
+      <dl><div><dt>Location</dt><dd>{{ alert.site.code if alert.site else 'System-wide' }}</dd></div><div><dt>Last observed</dt><dd>{{ display_time(alert.last_seen_at, alert.site.timezone if alert.site else none) }}</dd></div><div><dt>Occurrences</dt><dd>{{ alert.occurrence_count }}</dd></div></dl>
+      <a class="button-secondary" href="/alerts/{{ alert.id }}">Investigate Alert</a>
     </article>
-  {% else %}<div class="empty-state"><strong>{% if tab == 'history' %}No resolved alerts{% else %}No active alerts{% endif %}</strong><span>Monitoring conditions will appear here without affecting access or physical controls.</span></div>{% endfor %}
+  {% else %}<div class="empty-state"><strong>{% if tab == 'history' %}No resolved alerts{% else %}No active alerts{% endif %}</strong><span>New operational conditions will appear here without affecting access or physical controls.</span></div>{% endfor %}
   </div>
 </section>
 {% endif %}

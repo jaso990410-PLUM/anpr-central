@@ -64,14 +64,20 @@ def event_center(
         if start.astimezone(timezone.utc) > end.astimezone(timezone.utc):
             raise HTTPException(400, "Start date must not be after end date")
     service = MonitoringQueryService(db)
+    event_page = service.events(tab="attention" if tab == "attention" else "all", page=page,
+        category=category, event_type=event_type, severity=severity,
+        site_id=site, camera_id=camera, search=search, operator=operator,
+        date_from=date_from, date_to=date_to) if tab in {"attention", "all"} else None
+    active_alerts = service.alerts()
     context = _context(request, db, user, "events")
     context.update({
         "tab": tab,
-        "event_page": service.events(tab="attention" if tab == "attention" else "all", page=page,
-            category=category, event_type=event_type, severity=severity,
-            site_id=site, camera_id=camera, search=search, operator=operator,
-            date_from=date_from, date_to=date_to) if tab in {"attention", "all"} else None,
-        "alerts": service.alerts(status="resolved" if tab == "history" else "active") if tab in {"alerts", "history"} else (),
+        "event_page": event_page,
+        "alerts": service.alerts(status="resolved") if tab == "history" else active_alerts if tab == "alerts" else (),
+        "center_summary": service.event_center_summary(),
+        "active_alert_count": len(active_alerts),
+        "event_alerts": service.alerts_for_events(event_page.items) if event_page else {},
+        "correlation_counts": service.correlation_counts(event_page.items) if event_page else {},
         "sites": service.sites(), "cameras": service.cameras(), "event_types": service.event_types(),
         "filters": {"category": category, "event_type": event_type, "severity": severity,
                     "site": str(site or ""), "camera": str(camera or ""), "search": search,
@@ -79,6 +85,12 @@ def event_center(
                     "date_from": date_from.strftime("%Y-%m-%dT%H:%M") if date_from else "",
                     "date_to": date_to.strftime("%Y-%m-%dT%H:%M") if date_to else ""},
         "display_time": service.display_time, "source_url": service.source_url,
+        "category_label": service.category_label, "category_icon": service.category_icon,
+        "date_group": service.date_group, "event_context": service.event_context,
+        "source_action": service.source_action, "is_major": service.is_major,
+        "event_video_url": service.event_video_url,
+        "can_view_media": user_has_permission(user, "media.view"),
+        "poll_after": datetime.now(timezone.utc).isoformat(),
     })
     return templates.TemplateResponse(request=request, name="monitoring/events.html", context=context)
 
@@ -92,7 +104,8 @@ def event_detail(event_id: UUID, request: Request,
     service = MonitoringQueryService(db)
     context = _context(request, db, user, "events")
     context.update({"event": event, "related": service.correlated(event),
-                    "display_time": service.display_time, "source_url": service.source_url})
+                    "display_time": service.display_time, "source_url": service.source_url,
+                    "category_label": service.category_label})
     return templates.TemplateResponse(request=request, name="monitoring/event_detail.html", context=context)
 
 
@@ -154,10 +167,11 @@ def health_detail(component_type: str, component_id: str, request: Request,
 
 
 @router.get("/api/monitoring/events", response_class=JSONResponse)
-def incremental_events(after: datetime, _user: User = Depends(require_permission("monitoring.view")),
+def incremental_events(after: datetime, attention_only: bool = False,
+    _user: User = Depends(require_permission("monitoring.view")),
     db: Session = Depends(get_db)) -> dict[str, object]:
     service = MonitoringQueryService(db)
-    page = service.events(tab="all", after=after, page_size=50)
+    page = service.events(tab="attention" if attention_only else "all", after=after, page_size=50)
     return {"items": [{"id": str(item.id), "event_type": item.event_type, "severity": item.severity,
                        "attention_required": item.attention_required, "occurred_at": item.occurred_at.isoformat(),
                        "subject": item.display_subject, "summary": item.summary} for item in reversed(page.items)],

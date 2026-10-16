@@ -177,13 +177,21 @@ def test_monitoring_pages_permissions_csrf_navigation_and_bounded_api(client: Te
     now = datetime.now(timezone.utc)
     event = EventService(db).record(event_type="BLACKLIST_MATCH", occurred_at=now,
         source_type="test", source_id="one", display_subject="ABC1234", summary="Blacklist match",
-        site_id=site.id, camera_id=camera.id)
+        site_id=site.id, camera_id=camera.id, correlation_id=camera.id)
+    EventService(db).record(event_type="ACCESS_DENIED", occurred_at=now + timedelta(milliseconds=1),
+        source_type="test", source_id="two", display_subject="ABC1234",
+        summary="Deny: Blacklisted vehicle", site_id=site.id, camera_id=camera.id,
+        correlation_id=camera.id)
     alert = AlertService(db).observe_condition(alert_type="CAMERA_OFFLINE", severity="WARNING",
         site_id=site.id, component_type="CAMERA", component_id=str(camera.id), title="Camera offline",
-        summary="Heartbeat stale", observed_at=now)
+        summary="Heartbeat stale", observed_at=now, trigger_event_id=event.id)
     db.commit(); login(client)
     page = client.get("/events")
     assert page.status_code == 200 and "Event Center" in page.text and "ABC1234" in page.text
+    assert "Server-side projection" not in page.text
+    assert "Access &amp; Security" in page.text and "More filters" in page.text
+    assert "1 active alert" in page.text and "Alert status" in page.text and "Active" in page.text
+    assert "1 related event" in page.text and "No camera" not in page.text
     assert 'data-nav-key="events"' in page.text and 'data-nav-key="system-health"' in page.text
     assert client.get(f"/events/{event.id}").status_code == 200
     health_page = client.get("/system-health")
@@ -222,3 +230,23 @@ def test_high_volume_all_events_is_bounded_and_attention_stays_concise(db: Sessi
     assert query.events(tab="attention").total == 0
     first_page = query.events(tab="all")
     assert first_page.total == 120 and len(first_page.items) == 50 and first_page.page_count == 3
+
+
+def test_event_center_summary_excludes_routine_recognition_volume(db: Session) -> None:
+    site, camera = site_camera(db)
+    service = EventService(db)
+    now = datetime.now(timezone.utc)
+    for index in range(3):
+        service.record(event_type="ANPR_RECOGNITION", occurred_at=now,
+            source_type="Recognition", source_id=str(index), display_subject=f"ABC{index}",
+            summary="Routine recognition", site_id=site.id, camera_id=camera.id)
+    service.record(event_type="MQTT_DISCONNECTED", occurred_at=now,
+        source_type="HealthTransition", source_id="mqtt-down", display_subject="MQTT broker",
+        summary="Broker connection lost", site_id=site.id)
+    AlertService(db).observe_condition(alert_type="MQTT_DISCONNECTED", severity="CRITICAL",
+        site_id=site.id, component_type="MQTT_BROKER", component_id="central",
+        title="MQTT disconnected", summary="Broker connection lost", observed_at=now)
+    db.commit()
+
+    summary = MonitoringQueryService(db).event_center_summary()
+    assert summary == {"active_alerts": 1, "attention": 1, "critical": 1, "last_24h": 1}

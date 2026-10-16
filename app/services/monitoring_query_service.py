@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -12,6 +12,25 @@ from sqlalchemy.orm import Session, joinedload
 from app.models.camera import Camera
 from app.models.monitoring import ComponentHealth, OperationalAlert, UnifiedEvent
 from app.models.site import Site
+
+
+CATEGORY_LABELS = {
+    "TRAFFIC_ANPR": "Traffic / ANPR",
+    "ACCESS_SECURITY": "Access & Security",
+    "ADMIN_BUSINESS": "Administration",
+    "OPERATOR_ACTION": "Operator Actions",
+    "SYSTEM_HEALTH": "System Health",
+}
+
+CATEGORY_ICONS = {
+    "TRAFFIC_ANPR": "ANPR",
+    "ACCESS_SECURITY": "SEC",
+    "ADMIN_BUSINESS": "ADM",
+    "OPERATOR_ACTION": "OPS",
+    "SYSTEM_HEALTH": "SYS",
+}
+
+ROUTINE_RECOGNITION_TYPES = {"ANPR_RECOGNITION", "OFFLINE_RECOGNITION_RECOVERED"}
 
 
 def _zone(name: str | None) -> ZoneInfo | timezone:
@@ -105,6 +124,46 @@ class MonitoringQueryService:
             query = query.where(OperationalAlert.status == "RESOLVED")
         return tuple(self.db.scalars(query.order_by(OperationalAlert.severity.asc(), OperationalAlert.last_seen_at.desc())).unique().all())
 
+    def event_center_summary(self) -> dict[str, int]:
+        since = datetime.now(timezone.utc) - timedelta(hours=24)
+        active_alerts = self.db.scalar(select(func.count()).select_from(OperationalAlert).where(
+            OperationalAlert.status.in_(("ACTIVE", "ACKNOWLEDGED")))) or 0
+        attention = self.db.scalar(select(func.count()).select_from(UnifiedEvent).where(
+            UnifiedEvent.attention_required.is_(True), UnifiedEvent.occurred_at >= since)) or 0
+        critical = self.db.scalar(select(func.count()).select_from(UnifiedEvent).where(
+            UnifiedEvent.severity == "CRITICAL", UnifiedEvent.occurred_at >= since)) or 0
+        operational = self.db.scalar(select(func.count()).select_from(UnifiedEvent).where(
+            UnifiedEvent.occurred_at >= since,
+            UnifiedEvent.event_type.not_in(ROUTINE_RECOGNITION_TYPES))) or 0
+        return {"active_alerts": active_alerts, "attention": attention,
+                "critical": critical, "last_24h": operational}
+
+    def correlation_counts(self, events: tuple[UnifiedEvent, ...]) -> dict[UUID, int]:
+        correlation_ids = {event.correlation_id for event in events if event.correlation_id is not None}
+        if not correlation_ids:
+            return {}
+        return {correlation_id: count for correlation_id, count in self.db.execute(
+            select(UnifiedEvent.correlation_id, func.count())
+            .where(UnifiedEvent.correlation_id.in_(correlation_ids))
+            .group_by(UnifiedEvent.correlation_id)
+        ) if count > 1}
+
+    def alerts_for_events(self, events: tuple[UnifiedEvent, ...]) -> dict[UUID, OperationalAlert]:
+        event_ids = {event.id for event in events}
+        if not event_ids:
+            return {}
+        rows = self.db.scalars(select(OperationalAlert).where(or_(
+            OperationalAlert.trigger_event_id.in_(event_ids),
+            OperationalAlert.resolution_event_id.in_(event_ids),
+        )).order_by(OperationalAlert.last_seen_at.desc())).all()
+        result: dict[UUID, OperationalAlert] = {}
+        for alert in rows:
+            if alert.trigger_event_id in event_ids:
+                result.setdefault(alert.trigger_event_id, alert)
+            if alert.resolution_event_id in event_ids:
+                result.setdefault(alert.resolution_event_id, alert)
+        return result
+
     def correlated(self, event: UnifiedEvent) -> tuple[UnifiedEvent, ...]:
         if event.correlation_id is None:
             return (event,)
@@ -150,6 +209,61 @@ class MonitoringQueryService:
 
     def cameras(self) -> tuple[Camera, ...]:
         return tuple(self.db.scalars(select(Camera).order_by(Camera.code)).all())
+
+    @staticmethod
+    def category_label(category: str) -> str:
+        return CATEGORY_LABELS.get(category, category.replace("_", " ").title())
+
+    @staticmethod
+    def category_icon(category: str) -> str:
+        return CATEGORY_ICONS.get(category, "EVT")
+
+    @staticmethod
+    def date_group(event: UnifiedEvent) -> str:
+        zone = _zone(event.site.timezone if event.site else None)
+        local_day = event.occurred_at.replace(tzinfo=timezone.utc).astimezone(zone).date() if event.occurred_at.tzinfo is None else event.occurred_at.astimezone(zone).date()
+        today = datetime.now(timezone.utc).astimezone(zone).date()
+        if local_day == today:
+            return "Today"
+        if local_day == today - timedelta(days=1):
+            return "Yesterday"
+        return local_day.strftime("%d %b %Y")
+
+    @staticmethod
+    def event_context(event: UnifiedEvent) -> tuple[str, ...]:
+        context: list[str] = []
+        if event.site:
+            context.append(event.site.code)
+        if event.camera:
+            context.append(event.camera.code)
+        if not context:
+            context.append("System-wide")
+        return tuple(context)
+
+    @staticmethod
+    def source_action(event: UnifiedEvent) -> str:
+        if event.source_type == "RecognitionEvent":
+            return "View Recognition"
+        if event.source_type == "HealthTransition":
+            return "Investigate"
+        if event.source_type == "BarrierAction":
+            return "View Barrier Action"
+        return "Open Source"
+
+    @staticmethod
+    def is_major(event: UnifiedEvent) -> bool:
+        return event.severity == "CRITICAL" or event.event_type in {
+            "BLACKLIST_MATCH", "WATCHLIST_MATCH", "CAMERA_OFFLINE", "RECORDING_GAP",
+            "STORAGE_FAULT", "MQTT_DISCONNECTED", "BARRIER_COMMAND_FAILED",
+        }
+
+    @staticmethod
+    def event_video_url(event: UnifiedEvent) -> str | None:
+        if event.correlation_id and event.category in {"TRAFFIC_ANPR", "ACCESS_SECURITY"}:
+            return f"/media/events/{event.correlation_id}"
+        if event.source_type == "RecognitionEvent":
+            return f"/media/events/{event.source_id}"
+        return None
 
     @staticmethod
     def display_time(value: datetime | None, timezone_name: str | None = None) -> str:
