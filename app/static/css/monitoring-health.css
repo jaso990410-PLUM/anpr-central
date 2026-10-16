@@ -1,0 +1,48 @@
+.site-health-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.8rem;
+    padding: 1rem;
+}
+
+.site-health-grid > article {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.75rem;
+    padding: 1rem;
+    border: 1px solid #243247;
+    border-radius: 10px;
+    background: #0e1925;
+}
+
+.site-health-grid > article > div {
+    display: grid;
+}
+
+.site-health-grid > article > div span,
+.site-health-grid dt {
+    color: #718198;
+}
+
+.site-health-grid dl {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+    margin: 0;
+}
+
+.site-health-grid dl div {
+    display: grid;
+    gap: 0.2rem;
+}
+
+.site-health-grid dd {
+    margin: 0;
+}
+
+@media (max-width: 720px) {
+    .site-health-grid dl {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}

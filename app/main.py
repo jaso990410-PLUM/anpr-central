@@ -14,6 +14,7 @@ from app.api.cameras import router as cameras_router
 from app.api.control_boards import router as control_boards_router
 from app.api.mqtt_settings import router as mqtt_settings_router
 from app.api.media import router as media_router
+from app.api.monitoring import router as monitoring_router
 from app.api.operations import router as operations_router
 from app.api.live_status import router as live_status_router
 from app.api.recognition import router as recognition_router
@@ -70,6 +71,7 @@ app.include_router(cameras_router)
 app.include_router(control_boards_router)
 app.include_router(mqtt_settings_router)
 app.include_router(media_router)
+app.include_router(monitoring_router)
 app.include_router(operations_router)
 app.include_router(live_status_router)
 app.include_router(recognition_router)

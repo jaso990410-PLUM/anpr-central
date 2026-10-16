@@ -35,6 +35,8 @@ _PERMISSION_NAVIGATION = (
     ("Management", "users", "Users", "users", "users.view", "/users"),
     ("Monitoring", "recognition", "Recognition History", "recognition", "events.view", "/recognition"),
     ("Monitoring", "media", "ANPR Recording", "camera", "media.view", "/media"),
+    ("Monitoring", "events", "Event Center", "audit", "monitoring.view", "/events"),
+    ("Monitoring", "system-health", "System Health", "settings", "monitoring.view", "/system-health"),
     ("Parking", "parking-on-site", "On-Site Vehicles", "vehicles", "parking.view", "/parking/on-site"),
     ("Parking", "parking-history", "Stay History", "audit", "parking.view", "/parking/history"),
     ("Parking", "parking-reviews", "Exit Reviews", "audit", "parking.view", "/parking/reviews"),

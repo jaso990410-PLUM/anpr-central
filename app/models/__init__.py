@@ -15,6 +15,7 @@ from app.models.control_board import (
 from app.models.mqtt_broker_config import MqttBrokerConfig
 from app.models.media import EventMediaReference, MediaEvidenceHold, MediaExport, MediaSource, MediaStorage, RecordingSegment
 from app.models.offline_recovery_run import OfflineRecoveryRun
+from app.models.monitoring import ComponentHealth, OperationalAlert, UnifiedEvent
 from app.models.operations import ParkingReconciliation, RecognitionPlateCorrection, VehicleWatch
 from app.models.residential import Resident, ResidentialSiteSettings, ResidentialUnit, ResidentUnitMembership, ResidentVehicleAssignment, VisitorReservation
 from app.models.recognition_event import RecognitionEvent
@@ -42,6 +43,7 @@ __all__ = [
     "MqttBrokerConfig",
     "EventMediaReference", "MediaEvidenceHold", "MediaExport", "MediaSource", "MediaStorage", "RecordingSegment",
     "OfflineRecoveryRun",
+    "ComponentHealth", "OperationalAlert", "UnifiedEvent",
     "ParkingReconciliation",
     "RecognitionPlateCorrection",
     "VehicleWatch",

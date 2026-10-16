@@ -26,6 +26,9 @@ DEFAULT_PERMISSIONS = {
     "events.view": "View ANPR recognition events",
 
     "audit.view": "View audit logs",
+    "monitoring.view": "View operational events, alerts, and system health",
+    "alerts.acknowledge": "Acknowledge active operational alerts",
+    "monitoring.manage": "Manage monitoring configuration",
     "settings.manage": "Manage system settings",
     "access_list.view": "View central access-list records and synchronization state",
     "access_list.manage": "Create, edit, enable, and synchronize access-list records",
@@ -65,6 +68,8 @@ DEFAULT_ROLES = {
             "sites.view",
             "cameras.view",
             "events.view",
+            "monitoring.view",
+            "alerts.acknowledge",
         ],
     },
 
@@ -74,6 +79,8 @@ DEFAULT_ROLES = {
         "permissions": [
             "cameras.view",
             "events.view",
+            "monitoring.view",
+            "alerts.acknowledge",
         ],
     },
 
@@ -84,6 +91,7 @@ DEFAULT_ROLES = {
             "sites.view",
             "cameras.view",
             "events.view",
+            "monitoring.view",
         ],
     },
 }
