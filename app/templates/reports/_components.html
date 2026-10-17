@@ -1,0 +1,50 @@
+{% macro report_header(title, description, export_domain=None) %}
+<header class="page-header report-page-header">
+  <div><p class="eyebrow">Historical analytics</p><h1>{{ title }}</h1><p>{{ description }}</p></div>
+  <div class="page-header-actions">
+    <span class="status-badge status-badge--neutral">{{ report_query.site.code }}</span>
+    {% if export_domain and can_export_reports %}<a class="button-secondary" href="/reports/{{ export_domain }}/export.csv?{{ report_params }}">Export CSV</a>{% endif %}
+  </div>
+</header>
+{% endmacro %}
+
+{% macro report_tabs() %}
+<nav class="report-tabs" aria-label="Report sections">
+  <a class="{% if report_active == 'overview' %}is-active{% endif %}" href="/reports?{{ report_params }}">Overview</a>
+  <a class="{% if report_active == 'traffic' %}is-active{% endif %}" href="/reports/traffic?{{ report_params }}">Traffic &amp; Occupancy</a>
+  <a class="{% if report_active == 'access' %}is-active{% endif %}" href="/reports/access?{{ report_params }}">Access &amp; Security</a>
+  <a class="{% if report_active == 'operations' %}is-active{% endif %}" href="/reports/operations?{{ report_params }}">Operational Activity</a>
+  <a class="{% if report_active == 'reliability' %}is-active{% endif %}" href="/reports/reliability?{{ report_params }}">System Reliability</a>
+</nav>
+{% endmacro %}
+
+{% macro filters() %}
+<section class="ops-panel report-filter-panel" aria-labelledby="report-filter-title">
+  <header class="panel-header"><div><p class="panel-kicker">Site-local reporting period</p><h2 id="report-filter-title">{{ report_query.range_label }}</h2><p>{{ report_query.timezone_name }} &middot; {{ report_query.granularity|title }} aggregation</p></div></header>
+  <form class="report-filter-form" method="get">
+    <div class="field-group"><label for="report-site">Site</label><select id="report-site" name="site">{% for item in sites %}<option value="{{ item.id }}" {% if item.id == report_query.site.id %}selected{% endif %}>{{ item.code }} &middot; {{ item.name }}</option>{% endfor %}</select></div>
+    <div class="field-group"><label for="report-period">Period</label><select id="report-period" name="period"><option value="today" {% if report_query.preset == 'today' %}selected{% endif %}>Today</option><option value="yesterday" {% if report_query.preset == 'yesterday' %}selected{% endif %}>Yesterday</option><option value="last_7_days" {% if report_query.preset == 'last_7_days' %}selected{% endif %}>Last 7 Days</option><option value="this_month" {% if report_query.preset == 'this_month' %}selected{% endif %}>This Month</option><option value="last_30_days" {% if report_query.preset == 'last_30_days' %}selected{% endif %}>Last 30 Days</option><option value="custom" {% if report_query.preset == 'custom' %}selected{% endif %}>Custom Range</option></select></div>
+    <div class="field-group"><label for="report-camera">Lane / camera</label><select id="report-camera" name="camera"><option value="">All lanes</option>{% for item in cameras %}<option value="{{ item.id }}" {% if report_query.camera and item.id == report_query.camera.id %}selected{% endif %}>{{ item.code }} &middot; {{ item.lane_role|replace('_',' ')|title }}</option>{% endfor %}</select></div>
+    <div class="field-group"><label for="report-from">Start date</label><input id="report-from" type="date" name="date_from" value="{{ report_query.date_from.isoformat() }}"></div>
+    <div class="field-group"><label for="report-to">End date</label><input id="report-to" type="date" name="date_to" value="{{ report_query.date_to.isoformat() }}"></div>
+    <div class="filter-actions"><button class="button-primary button-primary--compact" type="submit">Apply Period</button></div>
+  </form>
+  <p class="panel-note">Choose Custom Range to apply the entered dates. All boundaries use the selected site&rsquo;s local time.</p>
+</section>
+{% endmacro %}
+
+{% macro bar_chart(rows, series, empty_message) %}
+{% set totals = namespace(value=0) %}{% for row in rows %}{% for item in series %}{% set totals.value = totals.value + row[item.key] %}{% endfor %}{% endfor %}
+{% if rows and totals.value %}
+<div class="report-chart" role="img" aria-label="{{ empty_message|replace('No ', '') }}">
+  <div class="report-chart__legend">{% for item in series %}<span><i class="report-chart__swatch report-chart__swatch--{{ item.tone }}"></i>{{ item.label }}</span>{% endfor %}</div>
+  <div class="report-chart__plot">
+    {% for row in rows %}<div class="report-chart__group"><div class="report-chart__bars">{% for item in series %}<span class="report-chart__bar report-chart__bar--{{ item.tone }}" style="height: {{ row.bars[item.key] }}%" title="{{ item.label }}: {{ row[item.key] }}"><b class="sr-only">{{ item.label }} {{ row[item.key] }}</b></span>{% endfor %}</div><small>{{ row.label }}</small></div>{% endfor %}
+  </div>
+</div>
+{% else %}<div class="empty-state"><strong>{{ empty_message }}</strong><span>Choose another period or site to review historical activity.</span></div>{% endif %}
+{% endmacro %}
+
+{% macro ranked_bars(rows, empty_message) %}
+{% if rows %}<div class="ranked-bars">{% for row in rows %}<div class="ranked-bar"><div><strong>{{ row.label }}</strong><span>{{ row.count }}</span></div><div class="ranked-bar__track"><i style="width: {{ row.bars.count }}%"></i></div></div>{% endfor %}</div>{% else %}<div class="empty-state"><strong>{{ empty_message }}</strong></div>{% endif %}
+{% endmacro %}

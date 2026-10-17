@@ -51,6 +51,8 @@ DEFAULT_PERMISSIONS = {
     "media.view": "View ANPR recording and playback",
     "media.export": "Export and download ANPR evidence",
     "media.manage": "Configure ANPR recording, storage, and evidence holds",
+    "reports.view": "View historical analytics and reports",
+    "reports.export": "Export filtered historical reports",
 }
 
 

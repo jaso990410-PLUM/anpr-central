@@ -1,0 +1,25 @@
+{% extends "base_app.html" %}
+{% from "reports/_components.html" import report_header, report_tabs, filters with context %}
+{% block title %}Reports &middot; ANPR Central{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', path='/css/reports.css') }}">{% endblock %}
+{% block content %}
+{{ report_header("Reports", "Period-based management analytics built from authoritative operational records.") }}
+{{ report_tabs() }}
+{{ filters() }}
+<section class="report-kpis report-kpis--primary" aria-label="Historical report summary">
+  <article><span>Entry</span><strong>{{ analytics.traffic.entries }}</strong><small>Session openings</small></article>
+  <article><span>Exit</span><strong>{{ analytics.traffic.exits }}</strong><small>Session closures</small></article>
+  <article><span>Average Stay</span><strong>{{ analytics.traffic.average_stay }}</strong><small>Completed stays only</small></article>
+  <article><span>Peak Entry</span><strong class="report-kpi-text">{{ analytics.traffic.peak_entry.label if analytics.traffic.peak_entry else '—' }}</strong><small>{% if analytics.traffic.peak_entry %}{{ analytics.traffic.peak_entry.count }} entries{% else %}No entries{% endif %}</small></article>
+  <article><span>Peak Occupancy</span><strong>{{ analytics.traffic.peak_occupancy }}</strong><small>{{ analytics.traffic.peak_occupancy_at }}</small></article>
+  <article><span>Denied Access</span><strong>{{ analytics.access.counts.DENY }}</strong><small>Authoritative decisions</small></article>
+  <article><span>Manual Releases</span><strong>{{ analytics.operations.manual_releases }}</strong><small>Operator requested</small></article>
+</section>
+<section class="report-domain-grid">
+  <a class="ops-panel report-domain-card" href="/reports/traffic?{{ report_params }}"><p class="panel-kicker">Movement truth</p><h2>Traffic &amp; Occupancy</h2><p>Entry and Exit trends, reconstructed occupancy, peak periods and completed-stay duration.</p><span>Open analytics &rarr;</span></a>
+  <a class="ops-panel report-domain-card" href="/reports/access?{{ report_params }}"><p class="panel-kicker">Policy outcomes</p><h2>Access &amp; Security</h2><p>Decision trends, denial reasons, access-profile use and security activity.</p><span>Open analytics &rarr;</span></a>
+  <a class="ops-panel report-domain-card" href="/reports/operations?{{ report_params }}"><p class="panel-kicker">Human and system activity</p><h2>Operational Activity</h2><p>Barrier outcomes, manual releases, corrections, reconciliation and offline recovery.</p><span>Open analytics &rarr;</span></a>
+  <a class="ops-panel report-domain-card" href="/reports/reliability?{{ report_params }}"><p class="panel-kicker">Observed history</p><h2>System Reliability</h2><p>Observed incidents, alerts, recording gaps and segment-backed media coverage.</p><span>Open analytics &rarr;</span></a>
+</section>
+<p class="report-boundary-note">Reports are observational. Investigate individual records in Lane Operations, Recognition History, Event Center, Barrier Actions, and Playback.</p>
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base_app.html" %}
+{% from "reports/_components.html" import report_header, report_tabs, filters, bar_chart, ranked_bars with context %}
+{% block title %}Access &amp; Security Reports &middot; ANPR Central{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', path='/css/reports.css') }}">{% endblock %}
+{% block content %}
+{{ report_header("Access & Security", "Historical policy decisions, denial causes, profile use, and security detections.", "access") }}{{ report_tabs() }}{{ filters() }}
+<section class="report-kpis"><article><span>Allow</span><strong>{{ analytics.counts.ALLOW }}</strong></article><article><span>Deny</span><strong>{{ analytics.counts.DENY }}</strong></article><article><span>Review</span><strong>{{ analytics.counts.REVIEW }}</strong></article><article><span>No Action</span><strong>{{ analytics.counts.NO_ACTION }}</strong></article></section>
+<section class="report-grid">
+  <article class="ops-panel report-panel report-panel--wide"><header class="panel-header"><div><p class="panel-kicker">Authoritative AccessDecision</p><h2>Decision Trend</h2></div></header>{{ bar_chart(analytics.trend, ({'key':'allow','label':'Allow','tone':'green'}, {'key':'deny','label':'Deny','tone':'red'}, {'key':'review','label':'Review','tone':'amber'}, {'key':'no_action','label':'No Action','tone':'neutral'}), 'No access decisions during this period.') }}</article>
+  <article class="ops-panel report-panel"><header class="panel-header"><div><p class="panel-kicker">Ranked causes</p><h2>Denial Reasons</h2></div></header>{% if analytics.denial_reasons %}<table class="report-summary-table"><thead><tr><th>Reason</th><th>Count</th><th>%</th></tr></thead><tbody>{% for row in analytics.denial_reasons %}<tr><td>{{ row.label }}</td><td>{{ row.count }}</td><td>{{ row.percent }}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty-state"><strong>No denied access events during this period.</strong></div>{% endif %}</article>
+  <article class="ops-panel report-panel"><header class="panel-header"><div><p class="panel-kicker">Existing classifications</p><h2>Access Profiles</h2></div></header>{{ ranked_bars(analytics.profiles, 'No access-profile activity during this period.') }}</article>
+  <article class="ops-panel report-panel report-panel--wide"><header class="panel-header"><div><p class="panel-kicker">Security attention</p><h2>Security Activity</h2></div><a class="button-quiet" href="/events?tab=all&amp;category=ACCESS_SECURITY">View Event Center</a></header><div class="report-inline-metrics"><div><span>Blacklist detections</span><strong>{{ analytics.blacklist }}</strong></div><div><span>Watchlist detections</span><strong>{{ analytics.watchlist }}</strong></div></div><p class="panel-note">A security detection is not classified as a system fault.</p></article>
+</section>
+{% endblock %}
