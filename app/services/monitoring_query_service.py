@@ -209,15 +209,28 @@ class MonitoringQueryService:
         return f"{days} day{'s' if days != 1 else ''} ago"
 
     @staticmethod
-    def state_age(item: ComponentHealth, *, now: datetime | None = None) -> str:
+    def state_age(item: ComponentHealth, monitoring_stale: bool = False, *, now: datetime | None = None) -> str:
+        if monitoring_stale:
+            return f"{item.health_state.title()} when last observed"
         age = MonitoringQueryService.relative_time(item.state_changed_at, now=now)
         return "Changed just now" if age == "just now" else f"{item.health_state.title()} for {age.removesuffix(' ago')}"
+
+    @staticmethod
+    def monitoring_is_stale(last_observed: datetime | None, stale_after_seconds: int,
+                            *, now: datetime | None = None) -> bool:
+        if last_observed is None:
+            return False
+        observed = last_observed.replace(tzinfo=timezone.utc) if last_observed.tzinfo is None else last_observed.astimezone(timezone.utc)
+        current = now or datetime.now(timezone.utc)
+        return current - observed > timedelta(seconds=stale_after_seconds)
 
     @staticmethod
     def component_summary(item: ComponentHealth) -> str:
         capabilities = item.capabilities or {}
         if item.component_type == "MQTT_CLIENT" and item.health_state == "UNKNOWN":
             return "Runtime health cannot currently be independently verified."
+        if item.component_type == "PERIPHERAL" and item.health_state == "UNVERIFIED":
+            return "No downstream device feedback."
         if item.component_type == "MEDIA" and item.health_state in {"DEGRADED", "UNKNOWN"}:
             return "Live stream has not been verified by the monitor. Recording health is tracked separately."
         if item.component_type == "STORAGE" and capabilities.get("free_bytes") is not None:

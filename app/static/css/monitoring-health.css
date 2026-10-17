@@ -77,6 +77,39 @@
     color: #aebdcd;
 }
 
+.monitor-stale-banner {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding: 1rem 1.1rem;
+    border: 1px solid #8a6727;
+    border-left: 4px solid #f1b94a;
+    border-radius: 10px;
+    background: #2b2314;
+}
+
+.monitor-stale-banner h2 {
+    margin: 0.15rem 0 0.35rem;
+    color: #fff1c9;
+}
+
+.monitor-stale-banner p:last-child {
+    margin: 0;
+    color: #d9c69c;
+}
+
+.health-state--stale {
+    color: #ffd477;
+    border-color: #715624;
+    background: #332711;
+}
+
+.monitor-note--neutral {
+    border-left-color: #52677e;
+}
+
 .site-health-grid dl {
     grid-column: 1 / -1;
     display: grid;
@@ -193,6 +226,10 @@
     .health-refresh-status {
         display: grid;
         justify-content: start;
+    }
+
+    .monitor-stale-banner {
+        grid-template-columns: 1fr;
     }
 
     .site-health-grid dl {

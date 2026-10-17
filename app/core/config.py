@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     media_recorder_poll_seconds: int = Field(default=5, ge=1, le=60)
     media_recorder_stale_seconds: int = Field(default=180, ge=30, le=3600)
     monitor_interval_seconds: int = Field(default=30, ge=5, le=300)
+    monitor_stale_after_seconds: int = Field(default=120, ge=30, le=3600)
     monitor_projection_batch_size: int = Field(default=500, ge=10, le=5000)
     monitor_database_slow_ms: int = Field(default=1000, ge=50, le=30000)
     monitor_database_failure_debounce_count: int = Field(default=2, ge=1, le=10)

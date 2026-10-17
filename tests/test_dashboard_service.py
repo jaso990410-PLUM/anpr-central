@@ -130,3 +130,15 @@ def test_dashboard_global_health_uses_monitoring_faults_and_alerts(db: Session) 
     assert summary.health_fault_count == 1
     assert summary.health_degraded_count == 0
     assert summary.active_alert_count == 1
+
+
+def test_dashboard_global_health_marks_old_observations_stale(db: Session) -> None:
+    db.add(ComponentHealth(component_type="APPLICATION", component_id="anpr-central",
+        display_name="ANPR Central", health_state="HEALTHY",
+        observed_at=NOW - timedelta(minutes=10), state_changed_at=NOW - timedelta(hours=1),
+        summary="Monitor cycle completed"))
+    db.flush()
+
+    summary = get_dashboard_summary(db, now=NOW)
+
+    assert summary.health_state == "STALE"

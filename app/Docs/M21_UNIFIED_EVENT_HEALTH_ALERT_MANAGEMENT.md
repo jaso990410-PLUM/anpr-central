@@ -92,7 +92,7 @@ Start the monitor from the repository directory with the same `ANPR_` environmen
 python -m app.monitor
 ```
 
-The interval defaults to 30 seconds and is configured with `ANPR_MONITOR_INTERVAL_SECONDS`. Other centralized controls include `ANPR_MONITOR_PROJECTION_BATCH_SIZE`, `ANPR_MONITOR_DATABASE_SLOW_MS`, `ANPR_MONITOR_DATABASE_FAILURE_DEBOUNCE_COUNT`, and `ANPR_MONITOR_NETWORK_TIMEOUT_SECONDS`. Database latency uses three samples and requires at least two slow samples; connection failure is retained in worker memory only after the configured consecutive-failure threshold and is recorded/resolved when PostgreSQL becomes writable again.
+The interval defaults to 30 seconds and is configured with `ANPR_MONITOR_INTERVAL_SECONDS`. Health data older than `ANPR_MONITOR_STALE_AFTER_SECONDS` (120 seconds by default) is presented as stale: the global state becomes unknown/stale and historical component states are explicitly described as last-observed evidence. Other centralized controls include `ANPR_MONITOR_PROJECTION_BATCH_SIZE`, `ANPR_MONITOR_DATABASE_SLOW_MS`, `ANPR_MONITOR_DATABASE_FAILURE_DEBOUNCE_COUNT`, and `ANPR_MONITOR_NETWORK_TIMEOUT_SECONDS`. Database latency uses three samples and requires at least two slow samples; connection failure is retained in worker memory only after the configured consecutive-failure threshold and is recorded/resolved when PostgreSQL becomes writable again.
 
 The monitor may read state, project events, update health, and open/update/resolve alerts. It never makes an access decision, mutates a recognition, opens a barrier, sends a peripheral command, changes an access list, restarts a device, or performs automatic remediation. Recognition and barrier operation remain functional if the worker stops.
 
@@ -110,7 +110,7 @@ These permissions do not imply `barrier.operate`, camera management, or access-l
 2. Open `/events`; Attention is the default view. Use All Events for normal ANPR traffic.
 3. Open Active Alerts, investigate through the linked component/source, and acknowledge with a concise operational note.
 4. Do not interpret acknowledgement as recovery. Wait for monitoring to resolve the condition.
-5. Open `/system-health` to distinguish core service, camera, media/storage, access, lane-equipment, and host states.
+5. Open `/system-health` to distinguish core service, camera, media/storage, access, lane-equipment, and host states. Treat the stale-data banner as an unknown current state and investigate the monitoring worker.
 6. Use authoritative linked pages for evidence, barrier actions, parking sessions, visitors, and lane operations.
 
 ## Hardware validation limitations

@@ -11,6 +11,7 @@ from app.core.security import hash_password
 from app.db.dependencies import get_db
 from app.main import app
 from app.models.camera import Camera
+from app.models.barrier import BarrierConfiguration
 from app.models.monitoring import ComponentHealth, OperationalAlert, UnifiedEvent
 from app.models.parking import AccessDecision
 from app.models.permission import Permission
@@ -171,6 +172,20 @@ def test_monitor_is_observational_and_does_not_use_recognition_silence_as_camera
     assert db.scalar(select(OperationalAlert).where(OperationalAlert.component_type == "CAMERA")) is None
 
 
+def test_configured_barrier_is_projected_into_lane_equipment_health(db: Session) -> None:
+    _, camera = site_camera(db)
+    db.add(BarrierConfiguration(camera_id=camera.id, enabled=True,
+        control_mode="CENTRAL_MANAGED", feedback_mode="NONE"))
+    db.commit()
+
+    MonitoringService(db).run_once(include_network_probe=False)
+
+    rows = db.scalars(select(ComponentHealth).where(
+        ComponentHealth.component_type.in_(("BARRIER_CONTROL", "BARRIER_FEEDBACK")))).all()
+    assert {(row.component_type, row.health_state) for row in rows} == {
+        ("BARRIER_CONTROL", "HEALTHY"), ("BARRIER_FEEDBACK", "DISABLED")}
+
+
 def test_monitoring_pages_permissions_csrf_navigation_and_bounded_api(client: TestClient, db: Session) -> None:
     assert client.get("/events").status_code == 303
     user(db, ("monitoring.view", "alerts.acknowledge")); site, camera = site_camera(db)
@@ -257,3 +272,29 @@ def test_event_center_summary_excludes_routine_recognition_volume(db: Session) -
 
     summary = MonitoringQueryService(db).event_center_summary()
     assert summary == {"active_alerts": 1, "attention": 1, "critical": 1, "last_24h": 1}
+
+
+def test_stale_health_data_is_not_presented_as_current(client: TestClient, db: Session) -> None:
+    user(db, ("monitoring.view",)); site, camera = site_camera(db)
+    observed = datetime.now(timezone.utc) - timedelta(hours=23)
+    db.add_all((
+        ComponentHealth(component_type="CAMERA", component_id=str(camera.id), site_id=site.id,
+            display_name=camera.code, health_state="FAULT", observed_at=observed,
+            state_changed_at=observed, summary="Camera heartbeat is stale",
+            capabilities={"claim": "VERIFIED"}),
+        ComponentHealth(component_type="PERIPHERAL", component_id="board:LED", site_id=site.id,
+            display_name=f"{camera.code} LED display", health_state="UNVERIFIED",
+            observed_at=observed, state_changed_at=observed,
+            summary="Camera command acknowledgement does not verify downstream RS-485 devices",
+            capabilities={"claim": "UNVERIFIED"}),
+    ))
+    db.commit(); login(client)
+
+    page = client.get("/system-health")
+
+    assert page.status_code == 200
+    assert "Monitoring data stale" in page.text and "Current system state is unknown" in page.text
+    assert "Monitoring stale" in page.text
+    assert "Fault when last observed" in page.text and "Fault for 23 hr" not in page.text
+    assert "No downstream device feedback." in page.text
+    assert "No barrier configuration exists" in page.text

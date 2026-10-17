@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BeforeValidator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
@@ -17,6 +17,7 @@ from app.db.dependencies import get_db
 from app.dependencies.auth import require_page_permission, require_permission, user_has_permission
 from app.dependencies.csrf import require_session_csrf
 from app.models.monitoring import ComponentHealth, OperationalAlert, UnifiedEvent
+from app.models.barrier import BarrierConfiguration
 from app.models.user import User
 from app.services.alert_service import AlertService
 from app.services.dashboard_service import get_dashboard_summary
@@ -150,6 +151,15 @@ def system_health(request: Request,
         key=lambda item: (0 if item.health_state == "FAULT" else 1, item.display_name),
     ))
     last_updated = max((item.observed_at for item in all_components), default=None)
+    monitoring_stale = service.monitoring_is_stale(
+        last_updated, settings.monitor_stale_after_seconds)
+    barrier_config_count = db.scalar(select(func.count()).select_from(BarrierConfiguration)) or 0
+    barrier_health_present = any(
+        item.component_type in {"BARRIER_CONTROL", "BARRIER_FEEDBACK"}
+        for item in all_components)
+    monitor_component_present = any(
+        item.component_type == "HOST" and item.component_id == "process"
+        for item in all_components)
     context = _context(request, db, user, "system-health")
     context.update({"groups": groups, "attention_components": attention_components,
                     "health_counts": service.health_counts(),
@@ -158,7 +168,13 @@ def system_health(request: Request,
                     "display_time": service.display_time, "relative_time": service.relative_time,
                     "state_age": service.state_age, "component_summary": service.component_summary,
                     "component_action": service.component_action, "last_updated": last_updated,
-                    "monitor_interval": settings.monitor_interval_seconds})
+                    "monitoring_stale": monitoring_stale,
+                    "monitor_interval": settings.monitor_interval_seconds,
+                    "monitor_stale_after": settings.monitor_stale_after_seconds,
+                    "barrier_config_count": barrier_config_count,
+                    "barrier_health_present": barrier_health_present,
+                    "monitor_investigate_url": "/system-health/HOST/process" if monitor_component_present
+                    else "/events?tab=all&category=SYSTEM_HEALTH"})
     return templates.TemplateResponse(request=request, name="monitoring/health.html", context=context)
 
 

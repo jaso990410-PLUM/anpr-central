@@ -136,6 +136,16 @@ def get_dashboard_summary(
         )
     ) or 0
     health_observation_count = db.scalar(select(func.count()).select_from(ComponentHealth)) or 0
+    last_health_observation = db.scalar(select(func.max(ComponentHealth.observed_at)))
+    observation_utc = (
+        last_health_observation.replace(tzinfo=timezone.utc)
+        if last_health_observation is not None and last_health_observation.tzinfo is None
+        else last_health_observation.astimezone(timezone.utc) if last_health_observation is not None else None
+    )
+    monitoring_stale = bool(
+        observation_utc is not None
+        and checked_at - observation_utc > timedelta(seconds=settings.monitor_stale_after_seconds)
+    )
     health_fault_count = db.scalar(
         select(func.count()).select_from(ComponentHealth)
         .where(ComponentHealth.health_state == "FAULT")
@@ -149,7 +159,9 @@ def get_dashboard_summary(
         .where(OperationalAlert.status.in_(("ACTIVE", "ACKNOWLEDGED")))
     ) or 0
     health_state = (
-        "FAULT" if not database_connected or health_fault_count
+        "FAULT" if not database_connected
+        else "STALE" if monitoring_stale
+        else "FAULT" if health_fault_count
         else "DEGRADED" if health_degraded_count or active_alert_count
         else "UNKNOWN" if not health_observation_count
         else "HEALTHY"
