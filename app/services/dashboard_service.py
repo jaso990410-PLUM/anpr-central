@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.camera import Camera
+from app.models.monitoring import ComponentHealth, OperationalAlert
 from app.models.site import Site
 from app.models.user import User
 from app.models.user_session import UserSession
@@ -50,6 +51,10 @@ class DashboardSummary:
     user_count: int
     active_user_count: int
     active_session_count: int
+    health_state: str
+    health_fault_count: int
+    health_degraded_count: int
+    active_alert_count: int
 
     @property
     def site_context(self) -> str:
@@ -130,6 +135,25 @@ def get_dashboard_summary(
             UserSession.last_seen_at > idle_cutoff,
         )
     ) or 0
+    health_observation_count = db.scalar(select(func.count()).select_from(ComponentHealth)) or 0
+    health_fault_count = db.scalar(
+        select(func.count()).select_from(ComponentHealth)
+        .where(ComponentHealth.health_state == "FAULT")
+    ) or 0
+    health_degraded_count = db.scalar(
+        select(func.count()).select_from(ComponentHealth)
+        .where(ComponentHealth.health_state == "DEGRADED")
+    ) or 0
+    active_alert_count = db.scalar(
+        select(func.count()).select_from(OperationalAlert)
+        .where(OperationalAlert.status.in_(("ACTIVE", "ACKNOWLEDGED")))
+    ) or 0
+    health_state = (
+        "FAULT" if not database_connected or health_fault_count
+        else "DEGRADED" if health_degraded_count or active_alert_count
+        else "UNKNOWN" if not health_observation_count
+        else "HEALTHY"
+    )
 
     camera_rows = db.execute(
         select(Camera, Site.code, Site.timezone)
@@ -176,4 +200,8 @@ def get_dashboard_summary(
         user_count=user_count,
         active_user_count=active_user_count,
         active_session_count=active_session_count,
+        health_state=health_state,
+        health_fault_count=health_fault_count,
+        health_degraded_count=health_degraded_count,
+        active_alert_count=active_alert_count,
     )

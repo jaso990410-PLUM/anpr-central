@@ -184,6 +184,75 @@ class MonitoringQueryService:
             groups.setdefault(group_map.get(item.component_type, "Other"), []).append(item)
         return {name: tuple(items) for name, items in groups.items()}
 
+    @staticmethod
+    def alert_map(alerts: tuple[OperationalAlert, ...]) -> dict[str, OperationalAlert]:
+        return {f"{alert.component_type}:{alert.component_id}": alert for alert in alerts}
+
+    @staticmethod
+    def relative_time(value: datetime | None, *, now: datetime | None = None) -> str:
+        if value is None:
+            return "Never"
+        current = now or datetime.now(timezone.utc)
+        observed = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+        seconds = max(0, int((current - observed).total_seconds()))
+        if seconds < 10:
+            return "just now"
+        if seconds < 60:
+            return f"{seconds} sec ago"
+        minutes = seconds // 60
+        if minutes < 60:
+            return f"{minutes} min ago"
+        hours = minutes // 60
+        if hours < 24:
+            return f"{hours} hr ago"
+        days = hours // 24
+        return f"{days} day{'s' if days != 1 else ''} ago"
+
+    @staticmethod
+    def state_age(item: ComponentHealth, *, now: datetime | None = None) -> str:
+        age = MonitoringQueryService.relative_time(item.state_changed_at, now=now)
+        return "Changed just now" if age == "just now" else f"{item.health_state.title()} for {age.removesuffix(' ago')}"
+
+    @staticmethod
+    def component_summary(item: ComponentHealth) -> str:
+        capabilities = item.capabilities or {}
+        if item.component_type == "MQTT_CLIENT" and item.health_state == "UNKNOWN":
+            return "Runtime health cannot currently be independently verified."
+        if item.component_type == "MEDIA" and item.health_state in {"DEGRADED", "UNKNOWN"}:
+            return "Live stream has not been verified by the monitor. Recording health is tracked separately."
+        if item.component_type == "STORAGE" and capabilities.get("free_bytes") is not None:
+            free_gb = capabilities["free_bytes"] / (1024 ** 3)
+            writable = "Recording writable" if capabilities.get("writable") else "Not writable"
+            return f"{free_gb:,.0f} GB free · {capabilities.get('free_percent', 0):.1f}% · {writable}"
+        if item.component_type == "RECORDING_SOURCE" and item.health_state in {"FAULT", "DEGRADED"}:
+            last_segment = capabilities.get("last_segment_at")
+            segment_text = "No completed recording segment is available"
+            if last_segment:
+                try:
+                    segment_text = f"Last completed segment {MonitoringQueryService.relative_time(datetime.fromisoformat(last_segment))}"
+                except (TypeError, ValueError):
+                    pass
+            recorder_state = capabilities.get("recorder_state", "unknown")
+            return f"Recording is stale. {segment_text}. Recorder reports {recorder_state}."
+        if item.component_type == "CAMERA" and item.health_state == "FAULT":
+            last_seen = capabilities.get("last_seen_at")
+            if last_seen:
+                try:
+                    return f"Camera heartbeat is stale · last seen {MonitoringQueryService.relative_time(datetime.fromisoformat(last_seen))}."
+                except (TypeError, ValueError):
+                    pass
+        return item.summary
+
+    @staticmethod
+    def component_action(item: ComponentHealth) -> str:
+        if item.health_state in {"FAULT", "DEGRADED"}:
+            if item.component_type == "STORAGE":
+                return "Open Storage"
+            if item.component_type == "ACCESS_SYNC":
+                return "View Sync Status"
+            return "Investigate"
+        return "Details"
+
     def health_counts(self) -> dict[str, int]:
         counts = {state: 0 for state in ("HEALTHY", "DEGRADED", "FAULT", "UNKNOWN", "UNVERIFIED", "DISABLED")}
         for state, count in self.db.execute(select(ComponentHealth.health_state, func.count()).group_by(ComponentHealth.health_state)):

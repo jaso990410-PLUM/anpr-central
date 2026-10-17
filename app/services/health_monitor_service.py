@@ -231,6 +231,13 @@ class MonitoringService:
                 state, summary = "UNKNOWN", "Recorder is starting"
             elif source.recorder_state == "DEGRADED":
                 state, summary = "DEGRADED", "Recorder reports degraded operation"
+            elif source.recorder_state == "RECORDING":
+                state = "FAULT"
+                if source.last_successful_segment_at:
+                    age_seconds = max(0, int((now - _utc(source.last_successful_segment_at)).total_seconds()))
+                    summary = f"Recording is stale; last completed segment was {age_seconds} seconds ago while recorder reports RECORDING"
+                else:
+                    summary = "Recording is stale; no completed segment is available while recorder reports RECORDING"
             else:
                 state, summary = "FAULT", f"Recorder state is {source.recorder_state}"
             self.health.observe(component_type="RECORDING_SOURCE", component_id=str(source.id),
@@ -243,7 +250,8 @@ class MonitoringService:
                 "UNKNOWN" if source.recorder_state == "STARTING" else "DEGRADED")
             self.health.observe(component_type="MEDIA", component_id=str(source.id), display_name=f"{source.camera.code} media stream",
                 state=media_state, summary="Recent media stream activity observed" if media_state == "HEALTHY" else
-                "Media source is not commissioned" if media_state == "DISABLED" else "Live media availability is not currently verified",
+                "Media source is not commissioned" if media_state == "DISABLED" else
+                "Live stream has not been verified by the monitor; recording health is tracked separately",
                 observed_at=now, site_id=source.camera.site_id,
                 capabilities={"claim": "DERIVED" if media_state != "DISABLED" else "NOT_CONFIGURED", "provider": source.provider_type})
             if source.enabled and source.recording_enabled:

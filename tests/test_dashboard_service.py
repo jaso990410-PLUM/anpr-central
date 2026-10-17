@@ -3,10 +3,12 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.models.camera import Camera
+from app.models.monitoring import ComponentHealth
 from app.models.site import Site
 from app.models.user import User
 from app.models.user_session import UserSession
 from app.services.dashboard_service import get_dashboard_summary
+from app.services.health_monitor_service import ComponentHealthService
 
 
 NOW = datetime(2026, 9, 27, 7, 0, tzinfo=timezone.utc)
@@ -93,6 +95,8 @@ def test_dashboard_summary_uses_live_database_counts(db: Session) -> None:
     assert summary.user_count == 2
     assert summary.active_user_count == 1
     assert summary.active_session_count == 2
+    assert summary.health_state == "UNKNOWN"
+    assert summary.active_alert_count == 0
 
 
 def test_dashboard_uses_configured_default_site(db: Session) -> None:
@@ -111,3 +115,18 @@ def test_dashboard_uses_configured_default_site(db: Session) -> None:
     assert summary.site_context == "MAIN"
     assert summary.site is not None
     assert summary.site.name == "Main Site"
+
+
+def test_dashboard_global_health_uses_monitoring_faults_and_alerts(db: Session) -> None:
+    ComponentHealthService(db).observe(
+        component_type="DATABASE", component_id="postgresql", display_name="PostgreSQL",
+        state="FAULT", summary="Database unavailable", observed_at=NOW,
+    )
+    db.flush()
+
+    summary = get_dashboard_summary(db, now=NOW)
+
+    assert summary.health_state == "FAULT"
+    assert summary.health_fault_count == 1
+    assert summary.health_degraded_count == 0
+    assert summary.active_alert_count == 1

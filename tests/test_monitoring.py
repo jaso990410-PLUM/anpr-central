@@ -185,6 +185,10 @@ def test_monitoring_pages_permissions_csrf_navigation_and_bounded_api(client: Te
     alert = AlertService(db).observe_condition(alert_type="CAMERA_OFFLINE", severity="WARNING",
         site_id=site.id, component_type="CAMERA", component_id=str(camera.id), title="Camera offline",
         summary="Heartbeat stale", observed_at=now, trigger_event_id=event.id)
+    db.add(ComponentHealth(component_type="CAMERA", component_id=str(camera.id), site_id=site.id,
+        display_name=camera.code, health_state="FAULT", observed_at=now,
+        state_changed_at=now - timedelta(minutes=18), summary="Camera heartbeat is stale",
+        capabilities={"claim": "VERIFIED", "last_seen_at": (now - timedelta(minutes=18)).isoformat()}))
     db.commit(); login(client)
     page = client.get("/events")
     assert page.status_code == 200 and "Event Center" in page.text and "ABC1234" in page.text
@@ -196,6 +200,9 @@ def test_monitoring_pages_permissions_csrf_navigation_and_bounded_api(client: Te
     assert client.get(f"/events/{event.id}").status_code == 200
     health_page = client.get("/system-health")
     assert health_page.status_code == 200 and "Operational sites" in health_page.text
+    assert "Needs Attention" in health_page.text and "ACTIVE ALERT" in health_page.text
+    assert "Fault for 18 min" in health_page.text and "Attention required" in health_page.text
+    assert "Refresh target" not in health_page.text and "<dt>Claim</dt>" not in health_page.text
     detail = client.get(f"/alerts/{alert.id}")
     assert detail.status_code == 200 and "Acknowledging confirms human review only" in detail.text
     assert client.post(f"/alerts/{alert.id}/acknowledge", data={"note": "Investigating"}).status_code == 403

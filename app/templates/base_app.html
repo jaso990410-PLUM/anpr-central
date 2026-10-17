@@ -60,13 +60,13 @@
                     </div>
                     <div class="context-divider"></div>
                     <div class="health-signal">
-                        <span class="status-dot {% if summary.database_connected %}status-dot--online{% else %}status-dot--critical{% endif %}"></span>
-                        <span>{% if summary.database_connected %}System healthy{% else %}System attention{% endif %}</span>
+                        <span class="status-dot {% if summary.health_state == 'HEALTHY' %}status-dot--online{% elif summary.health_state in ['DEGRADED','UNKNOWN'] %}status-dot--warning{% else %}status-dot--critical{% endif %}"></span>
+                        <span>{% if summary.health_state == 'HEALTHY' %}System healthy{% elif summary.health_state == 'DEGRADED' %}System degraded{% elif summary.health_state == 'UNKNOWN' %}Health unverified{% else %}Attention required{% endif %}</span>
                     </div>
                     <div class="context-divider context-divider--optional"></div>
                     <div class="camera-signal">
-                        <span class="data-text">DB</span>
-                        {% if summary.database_connected %}connected{% else %}unavailable{% endif %}
+                        <span class="data-text">ALERTS</span>
+                        {{ summary.active_alert_count }} active
                     </div>
                 </div>
 

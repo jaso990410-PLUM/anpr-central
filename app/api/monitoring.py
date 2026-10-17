@@ -142,10 +142,22 @@ def acknowledge_alert(alert_id: UUID, request: Request, note: Annotated[str, For
 def system_health(request: Request,
     user: User = Depends(require_page_permission("monitoring.view")), db: Session = Depends(get_db)) -> HTMLResponse:
     service = MonitoringQueryService(db)
+    groups = service.health_groups()
+    active_alerts = service.alerts()
+    all_components = tuple(item for items in groups.values() for item in items)
+    attention_components = tuple(sorted(
+        (item for item in all_components if item.health_state in {"FAULT", "DEGRADED"}),
+        key=lambda item: (0 if item.health_state == "FAULT" else 1, item.display_name),
+    ))
+    last_updated = max((item.observed_at for item in all_components), default=None)
     context = _context(request, db, user, "system-health")
-    context.update({"groups": service.health_groups(), "health_counts": service.health_counts(),
+    context.update({"groups": groups, "attention_components": attention_components,
+                    "health_counts": service.health_counts(),
                     "site_health": service.site_health_summaries(),
-                    "active_alerts": service.alerts(), "display_time": service.display_time,
+                    "active_alerts": active_alerts, "component_alerts": service.alert_map(active_alerts),
+                    "display_time": service.display_time, "relative_time": service.relative_time,
+                    "state_age": service.state_age, "component_summary": service.component_summary,
+                    "component_action": service.component_action, "last_updated": last_updated,
                     "monitor_interval": settings.monitor_interval_seconds})
     return templates.TemplateResponse(request=request, name="monitoring/health.html", context=context)
 
